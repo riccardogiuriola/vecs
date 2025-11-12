@@ -19,7 +19,8 @@ ALL_SRCS = $(shell find $(SRC_DIR) -name '*.c')
 
 # 2. Definisci i file che dipendono dalla piattaforma
 PLATFORM_SPECIFIC_SRCS = src/net/event_kqueue.c \
-                         src/net/event_epoll.c
+                         src/net/event_epoll.c \
+                         src/net/event_poll.c # <-- MODIFICA (Aggiunto event_poll.c)
 
 # 3. I sorgenti comuni sono TUTTI meno quelli specifici
 COMMON_SRCS = $(filter-out $(PLATFORM_SPECIFIC_SRCS), $(ALL_SRCS))
@@ -32,8 +33,8 @@ ifeq ($(OS),Darwin)
     PLATFORM_SRC = src/net/event_kqueue.c
     CFLAGS += -D_DARWIN_C_SOURCE # Definisce per macOS
 else ifeq ($(OS),Linux)
-    PLATFORM_SRC = src/net/event_epoll.c
-    CFLAGS += -D_GNU_SOURCE # Definisce per Linux (per epoll)
+    PLATFORM_SRC = src/net/event_poll.c # <-- MODIFICA (Cambiato da epoll a poll)
+    CFLAGS += -D_GNU_SOURCE # Definisce per Linux (per poll)
 else
     $(error Piattaforma $(OS) non supportata)
 endif
