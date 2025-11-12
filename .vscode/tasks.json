@@ -1,0 +1,22 @@
+//
+// vecs Project: Task di Build VSCode (Make)
+//
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build (make)",
+      "type": "shell",
+      // Esegue semplicemente 'make'
+      "command": "make",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$gcc" // Usa il problem matcher di GCC/Clang per gli errori
+      ],
+      "detail": "Esegue 'make' per compilare il progetto vecs"
+    }
+  ]
+}

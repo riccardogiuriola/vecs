@@ -1,0 +1,19 @@
+//
+// vecs Project: Configurazione Debug VSCode (Launch)
+//
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "(lldb) Launch vecs",
+      "type": "lldb",
+      "request": "launch",
+      // Programma da eseguire (compilato dal Makefile)
+      "program": "${workspaceFolder}/vecs",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      // Esegue il task "build" prima di avviare il debug
+      "preLaunchTask": "build (make)"
+    }
+  ]
+}
