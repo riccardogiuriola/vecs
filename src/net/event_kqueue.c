@@ -20,7 +20,7 @@
 #include <sys/time.h>
 
 // Struct interna (definizione dell'handle opaco)
-struct vex_event_loop_s {
+struct event_loop_s { // <-- CORREZIONE (rimosso vex_)
     int kq_fd;             // File descriptor di kqueue
     int max_events;
     struct kevent *events; // Array per gli eventi restituiti da kevent
@@ -50,8 +50,8 @@ static int el_kqueue_ctl(int kq_fd, int fd, int16_t filter, uint16_t flags, void
 
 // --- Implementazione API Pubblica ---
 
-vex_event_loop_t* el_create(int max_events) {
-    vex_event_loop_t *loop = malloc(sizeof(vex_event_loop_t));
+event_loop_t* el_create(int max_events) { // <-- CORREZIONE
+    event_loop_t *loop = malloc(sizeof(event_loop_t)); // <-- CORREZIONE
     if (loop == NULL) {
         log_error("malloc fallito per event_loop: %s", strerror(errno));
         return NULL;
@@ -77,14 +77,14 @@ vex_event_loop_t* el_create(int max_events) {
     return loop;
 }
 
-void el_destroy(vex_event_loop_t *loop) {
+void el_destroy(event_loop_t *loop) { // <-- CORREZIONE
     if (loop == NULL) return;
     close(loop->kq_fd);
     free(loop->events);
     free(loop);
 }
 
-int el_poll(vex_event_loop_t *loop, vex_event_t *active_events, int timeout_ms) {
+int el_poll(event_loop_t *loop, vex_event_t *active_events, int timeout_ms) { // <-- CORREZIONE
     struct timespec timeout;
     struct timespec *timeout_ptr = NULL;
     
@@ -138,12 +138,12 @@ int el_poll(vex_event_loop_t *loop, vex_event_t *active_events, int timeout_ms) 
     return num_events;
 }
 
-int el_add_fd_read(vex_event_loop_t *loop, int fd, void *udata) {
+int el_add_fd_read(event_loop_t *loop, int fd, void *udata) { // <-- CORREZIONE
     // Aggiunge l'evento di lettura (EV_ADD) e lo abilita (EV_ENABLE)
     return el_kqueue_ctl(loop->kq_fd, fd, EVFILT_READ, EV_ADD | EV_ENABLE, udata);
 }
 
-int el_del_fd(vex_event_loop_t *loop, int fd) {
+int el_del_fd(event_loop_t *loop, int fd) { // <-- CORREZIONE
     // kqueue rimuove tutti i filtri per un FD se non specificato
     // Per sicurezza, rimuoviamo esplicitamente lettura e scrittura
     el_kqueue_ctl(loop->kq_fd, fd, EVFILT_READ, EV_DELETE, NULL);
@@ -151,12 +151,12 @@ int el_del_fd(vex_event_loop_t *loop, int fd) {
     return 0;
 }
 
-int el_enable_write(vex_event_loop_t *loop, int fd, void *udata) {
+int el_enable_write(event_loop_t *loop, int fd, void *udata) { // <-- CORREZIONE
     // Aggiunge/abilita il filtro di scrittura
     return el_kqueue_ctl(loop->kq_fd, fd, EVFILT_WRITE, EV_ADD | EV_ENABLE, udata);
 }
 
-int el_disable_write(vex_event_loop_t *loop, int fd, void *udata) {
+int el_disable_write(event_loop_t *loop, int fd, void *udata) { // <-- CORREZIONE
     (void)udata; // Non usato da kqueue
     // Rimuove/disabilita il filtro di scrittura
     return el_kqueue_ctl(loop->kq_fd, fd, EVFILT_WRITE, EV_DELETE, NULL);

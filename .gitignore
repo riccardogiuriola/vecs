@@ -10,8 +10,7 @@ bin/
 
 .DS_Store
 
-.vscode/*.db
-.vscode/ipch/
+.vscode
 
 vex
 

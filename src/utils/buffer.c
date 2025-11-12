@@ -1,6 +1,9 @@
 /*
- * vex Project: Implementazione Buffer Dinamico
+ * Vex Project: Implementazione Buffer Dinamico
  * (src/utils/buffer.c)
+ *
+ * --- AGGIORNATO (Fase 3/Fix) ---
+ * Aggiunte funzioni di I/O e helper.
  */
 
 #include "buffer.h"
@@ -8,9 +11,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h> // Per read() e write()
+#include <sys/uio.h> // Per readv/writev (opzionale ma veloce)
 
 // Valore minimo di allocazione
 #define BUFFER_INITIAL_CAPACITY 64
+// Quanto spazio riservare per le letture
+#define BUFFER_READ_SIZE 4096
 
 // Struct interna (non visibile dall'header)
 struct buffer_s {
@@ -21,7 +28,7 @@ struct buffer_s {
 
 // Funzione helper per riallocare il buffer
 static int buffer_grow(buffer_t *buf, size_t min_needed) {
-    if (buffer_available(buf) >= min_needed) {
+    if (buf->capacity - buf->len >= min_needed) {
         return 0; // Spazio sufficiente
     }
 
@@ -71,7 +78,7 @@ void buffer_destroy(buffer_t *buf) {
     free(buf);
 }
 
-int buffer_append(buffer_t *buf, const void *data, size_t len) {
+int buffer_append_data(buffer_t *buf, const void *data, size_t len) {
     if (buffer_grow(buf, len) == -1) {
         return -1; // Fallimento allocazione
     }
@@ -80,6 +87,10 @@ int buffer_append(buffer_t *buf, const void *data, size_t len) {
     memcpy(buf->data + buf->len, data, len);
     buf->len += len;
     return 0;
+}
+
+int buffer_append_string(buffer_t *buf, const char *str) {
+    return buffer_append_data(buf, str, strlen(str));
 }
 
 void buffer_consume(buffer_t *buf, size_t len) {
@@ -97,7 +108,7 @@ void buffer_consume(buffer_t *buf, size_t len) {
     buf->len = remaining;
 }
 
-const char* buffer_data(const buffer_t *buf) {
+const void* buffer_peek(const buffer_t *buf) {
     return buf->data;
 }
 
@@ -105,10 +116,48 @@ size_t buffer_len(const buffer_t *buf) {
     return buf->len;
 }
 
-size_t buffer_available(const buffer_t *buf) {
-    return buf->capacity - buf->len;
+char* buffer_find_crlf(buffer_t *buf) {
+    if (buf->len < 2) return NULL;
+    // Cerca \r\n
+    // memmem è GNU, strnstr è BSD/POSIX. memchr è C standard.
+    // Usiamo un loop manuale per massima portabilità
+    for (size_t i = 0; i < buf->len - 1; i++) {
+        if (buf->data[i] == '\r' && buf->data[i+1] == '\n') {
+            return buf->data + i;
+        }
+    }
+    return NULL;
 }
 
-void buffer_clear(buffer_t *buf) {
-    buf->len = 0;
+
+ssize_t buffer_read_from_fd(buffer_t *buf, int fd) {
+    // Assicurati che ci sia spazio per leggere (almeno BUFFER_READ_SIZE)
+    if (buffer_grow(buf, BUFFER_READ_SIZE) == -1) {
+        errno = ENOMEM;
+        return -1;
+    }
+    
+    // Leggi direttamente nello spazio disponibile del buffer
+    ssize_t nread = read(fd, buf->data + buf->len, buf->capacity - buf->len);
+    
+    if (nread > 0) {
+        buf->len += nread; // Aggiorna la lunghezza
+    }
+    
+    return nread; // Restituisce nread, 0 (EOF), or -1 (errore)
+}
+
+ssize_t buffer_write_to_fd(buffer_t *buf, int fd) {
+    if (buf->len == 0) {
+        return 0; // Niente da scrivere
+    }
+
+    ssize_t nwritten = write(fd, buf->data, buf->len);
+
+    if (nwritten > 0) {
+        // Consuma i dati che abbiamo scritto con successo
+        buffer_consume(buf, nwritten);
+    }
+
+    return nwritten; // Restituisce nwritten or -1 (errore)
 }

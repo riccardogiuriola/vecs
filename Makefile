@@ -40,6 +40,11 @@ else
 endif
 
 # 5. Lista sorgenti completa
+#    (Verifichiamo che i sorgenti comuni non siano vuoti)
+ifeq ($(strip $(COMMON_SRCS)),)
+    $(error Nessun file sorgente comune trovato. Controlla SRC_DIR e PLATFORM_SPECIFIC_SRCS)
+endif
+
 SRCS = $(COMMON_SRCS) $(PLATFORM_SRC)
 
 # Genera i nomi dei file oggetto (es. obj/core/main.o)

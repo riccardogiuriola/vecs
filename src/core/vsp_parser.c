@@ -1,263 +1,223 @@
 /*
  * Vex Project: Implementazione VSP Parser
  * (src/core/vsp_parser.c)
- *
- * State machine per il parsing del protocollo VSP (RESP-like).
+ * * Riscritto per l'API Fase 3 (restituisce argc/argv)
  */
 
 #include "vsp_parser.h"
-#include "connection.h"
-#include "server.h"
 #include "buffer.h"
 #include "logger.h"
-
 #include <stdlib.h>
 #include <string.h>
-#include <errno.h>
-#include <ctype.h> // per isdigit
+#include <ctype.h>
 
-// Stato interno del parser
-typedef enum {
-    VSP_STATE_INIT,           // In attesa di un nuovo comando (cerca '*')
-    VSP_STATE_EXPECT_ARRAY_LEN, // In attesa del numero di argomenti (es. *3\r\n)
-    VSP_STATE_EXPECT_BULK_LEN,  // In attesa della lunghezza di un argomento (es. $5\r\n)
-    VSP_STATE_EXPECT_BULK_DATA  // In attesa dei dati dell'argomento (es. QUERY\r\n)
-} vsp_parser_state_t;
-
-#define VSP_MAX_ARGS 256
-
-// Struct interna (definizione dell'handle opaco)
 struct vsp_parser_s {
     vsp_parser_state_t state;
-    
-    long current_arg_count; // Numero totale di argomenti attesi
-    long current_arg_index; // Indice dell'argomento corrente che stiamo parsando
-    long current_bulk_len;  // Lunghezza in byte dell'argomento corrente (bulk)
-    
-    // Buffer temporaneo per gli argomenti parsati
-    char **argv;
-    size_t *argl; // Lunghezze degli argomenti
+    int argc;           // Numero totale di argomenti attesi
+    int arg_idx;        // Indice dell'argomento corrente
+    int bulk_len;       // Lunghezza dell'argomento (bulk string) corrente
+    char **argv;        // Array di argomenti in costruzione
 };
 
-// --- Funzioni Helper Interne ---
-
-/**
- * @brief Resetta lo stato del parser per prepararlo al prossimo comando.
- * Libera la memoria allocata per argv.
- */
-static void vsp_parser_reset(vsp_parser_t *parser) {
-    if (parser->argv) {
-        for (long i = 0; i < parser->current_arg_index; i++) {
-            free(parser->argv[i]);
-        }
-        free(parser->argv);
-        free(parser->argl);
-        parser->argv = NULL;
-        parser->argl = NULL;
-    }
-    
-    parser->state = VSP_STATE_INIT;
-    parser->current_arg_count = 0;
-    parser->current_arg_index = 0;
-    parser->current_bulk_len = -1;
-}
-
-/**
- * @brief Cerca il terminatore di linea \r\n (CRLF) nel buffer.
- * @return Un puntatore al \r (se trovato, \n segue), o NULL se non trovato.
- */
-static const char* find_crlf(buffer_t *buf) {
-    const char *data = buffer_data(buf);
-    size_t len = buffer_len(buf);
-    if (len < 2) return NULL;
-
-    for (size_t i = 0; i < len - 1; i++) {
-        if (data[i] == '\r' && data[i+1] == '\n') {
-            return data + i;
-        }
-    }
-    return NULL;
-}
-
-/**
- * @brief Tenta di parsare un numero (long) da una linea terminata da CRLF.
- * Consuma la linea dal buffer se ha successo.
- */
-static vsp_parse_result_t parse_long_from_line(buffer_t *buf, char type, long *result) {
-    const char *crlf = find_crlf(buf);
-    if (crlf == NULL) {
-        return VSP_PARSE_NEED_MORE_DATA; // Non abbiamo ancora una linea completa
-    }
-
-    const char *start = buffer_data(buf);
-    size_t line_len = (crlf - start) + 2; // +2 per \r\n
-
-    if (start[0] != type) {
-        log_warn("Errore di protocollo: atteso '%c', ricevuto '%c'", type, start[0]);
-        return VSP_PARSE_ERROR;
-    }
-
-    // Parsa il numero
-    long num = 0;
-    int sign = 1;
-    size_t i = 1; // Salta il carattere 'type'
-
-    if (i < line_len - 2 && start[i] == '-') {
-        sign = -1;
-        i++;
-    }
-    
-    if (i == line_len - 2) { // Solo tipo e CRLF (es. "$\r\n")
-         log_warn("Errore di protocollo: numero mancante dopo '%c'", type);
-         return VSP_PARSE_ERROR;
-    }
-
-    while (i < line_len - 2) {
-        if (!isdigit(start[i])) {
-            log_warn("Errore di protocollo: caratteri non validi in lunghezza");
-            return VSP_PARSE_ERROR;
-        }
-        num = (num * 10) + (start[i] - '0');
-        i++;
-    }
-
-    *result = num * sign;
-    buffer_consume(buf, line_len); // Linea processata, consuma
-    return VSP_PARSE_OK_COMMAND; // OK_COMMAND qui significa "linea parsata con successo"
-}
-
-
-// --- Funzioni Pubbliche ---
-
-vsp_parser_t* vsp_parser_create(void) {
-    vsp_parser_t *parser = malloc(sizeof(vsp_parser_t));
-    if (parser == NULL) {
-        log_error("malloc fallito per vsp_parser_t: %s", strerror(errno));
+vsp_parser_t *vsp_parser_create(void) {
+    vsp_parser_t *parser = calloc(1, sizeof(vsp_parser_t));
+    if (!parser) {
+        log_error("vsp_parser_create: Impossibile allocare memoria per il parser.");
         return NULL;
     }
-    
-    parser->argv = NULL;
-    parser->argl = NULL;
-    vsp_parser_reset(parser);
-    
+    // Lo stato (calloc) è già VSP_STATE_INIT
     return parser;
 }
 
 void vsp_parser_destroy(vsp_parser_t *parser) {
-    if (parser == NULL) return;
-    vsp_parser_reset(parser); // Libera argv/argl
+    if (!parser) return;
+    // Assicurati che l'argv parziale sia liberato
+    if (parser->argv) {
+        vsp_parser_free_argv(parser->arg_idx, parser->argv);
+    }
     free(parser);
 }
 
-vsp_parse_result_t vsp_parser_execute(struct vex_connection_s *conn) {
-    vsp_parser_t *parser = connection_get_parser(conn);
-    buffer_t *read_buf = connection_get_read_buffer(conn);
-    vsp_parse_result_t res;
+void vsp_parser_free_argv(int argc, char **argv) {
+    if (!argv) return;
+    for (int i = 0; i < argc; i++) {
+        free(argv[i]);
+    }
+    free(argv);
+}
 
-    // Loop finché abbiamo dati e siamo in uno stato processabile
-    while (buffer_len(read_buf) > 0) {
+vsp_parser_state_t vsp_parser_get_state(vsp_parser_t *parser) {
+    return parser->state;
+}
+
+/**
+ * @brief Resetta lo stato del parser per il prossimo comando.
+ */
+static void vsp_parser_reset(vsp_parser_t *parser) {
+    // Non liberare argv qui, viene passato al chiamante
+    parser->state = VSP_STATE_INIT;
+    parser->argc = 0;
+    parser->arg_idx = 0;
+    parser->bulk_len = 0;
+    parser->argv = NULL;
+}
+
+/**
+ * @brief Tenta di leggere una riga terminata da \r\n dal buffer.
+ * Consuma la riga dal buffer se trovata.
+ * Restituisce una stringa (da liberare) o NULL se non completa.
+ */
+static char* vsp_read_line(buffer_t *buf) {
+    char *crlf = buffer_find_crlf(buf);
+    if (!crlf) {
+        return NULL; // Riga non completa
+    }
+
+    // Calcola la lunghezza della riga (escluso \r\n)
+    size_t line_len = crlf - (char*)buffer_peek(buf);
+    
+    // Alloca memoria per la riga + terminatore nullo
+    char *line = malloc(line_len + 1);
+    if (!line) {
+        log_error("vsp_read_line: Impossibile allocare memoria per la riga.");
+        return NULL;
+    }
+
+    // Copia i dati e consuma dal buffer (inclusi \r\n)
+    memcpy(line, buffer_peek(buf), line_len);
+    line[line_len] = '\0';
+    buffer_consume(buf, line_len + 2); // +2 per \r\n
+    
+    return line;
+}
+
+
+vsp_parse_result_t vsp_parser_execute(vsp_parser_t *parser, buffer_t *buf, int *argc_out, char ***argv_out) {
+    char *line = NULL;
+
+    while (1) {
         switch (parser->state) {
             
             case VSP_STATE_INIT:
-                // All'inizio, ci aspettiamo un array '*'
-                parser->state = VSP_STATE_EXPECT_ARRAY_LEN;
-                // Non c'è 'break' qui, passiamo direttamente al prossimo stato
-            
-            case VSP_STATE_EXPECT_ARRAY_LEN:
-                res = parse_long_from_line(read_buf, '*', &parser->current_arg_count);
-                if (res == VSP_PARSE_NEED_MORE_DATA) return res; // Dati non sufficienti
-                if (res == VSP_PARSE_ERROR) {
-                    vsp_parser_reset(parser);
-                    return res; // Errore di protocollo
-                }
+                // In attesa di '*'
+                if (buffer_len(buf) < 1) return VSP_AGAIN;
                 
-                if (parser->current_arg_count > VSP_MAX_ARGS || parser->current_arg_count <= 0) {
-                     log_warn("Errore protocollo: numero argomenti non valido %ld", parser->current_arg_count);
-                     vsp_parser_reset(parser);
-                     return VSP_PARSE_ERROR;
+                if (*(char*)buffer_peek(buf) != '*') {
+                    parser->state = VSP_STATE_ERROR;
+                    log_warn("Errore di protocollo: atteso '*', ricevuto '%c'", *(char*)buffer_peek(buf));
+                    return VSP_ERROR;
                 }
+                buffer_consume(buf, 1);
+                parser->state = VSP_STATE_READ_ARGC;
+                break; // riesegui il loop
 
-                // Alloca spazio per gli argomenti
-                parser->argv = calloc(parser->current_arg_count, sizeof(char*));
-                parser->argl = calloc(parser->current_arg_count, sizeof(size_t));
-                if (parser->argv == NULL || parser->argl == NULL) {
-                    log_error("Fallita allocazione argv per il parser: %s", strerror(errno));
-                    vsp_parser_reset(parser);
-                    return VSP_PARSE_ERROR; // Errore server (out of memory)
-                }
+            case VSP_STATE_READ_ARGC:
+                // In attesa del numero di argomenti (es. "3\r\n")
+                line = vsp_read_line(buf);
+                if (!line) return VSP_AGAIN; // Dati incompleti
+
+                parser->argc = atoi(line);
+                free(line);
                 
-                parser->current_arg_index = 0;
-                parser->state = VSP_STATE_EXPECT_BULK_LEN;
-                break; // Passa al prossimo ciclo del while (potremmo non avere altri dati)
-
-            case VSP_STATE_EXPECT_BULK_LEN:
-                res = parse_long_from_line(read_buf, '$', &parser->current_bulk_len);
-                if (res == VSP_PARSE_NEED_MORE_DATA) return res;
-                if (res == VSP_PARSE_ERROR) {
-                    vsp_parser_reset(parser);
-                    return res;
+                if (parser->argc <= 0) {
+                    parser->state = VSP_STATE_ERROR;
+                    log_warn("Errore di protocollo: argc non valido (%d)", parser->argc);
+                    return VSP_ERROR;
                 }
 
-                if (parser->current_bulk_len < 0) { // Gestisce RESP Nil "$-1\r\n"
-                    parser->argv[parser->current_arg_index] = NULL; // Argomento nullo
-                    parser->argl[parser->current_arg_index] = 0;
-                    parser->current_arg_index++;
-                    parser->state = VSP_STATE_EXPECT_BULK_LEN; // Rimane in attesa del prossimo bulk len
-                } else {
-                    parser->state = VSP_STATE_EXPECT_BULK_DATA;
+                // Alloca l'array per gli argomenti
+                parser->argv = calloc(parser->argc, sizeof(char*));
+                if (!parser->argv) {
+                    log_error("vsp_parser: Impossibile allocare argv (size: %d)", parser->argc);
+                    parser->state = VSP_STATE_ERROR;
+                    return VSP_ERROR;
                 }
-                break; // Passa al prossimo ciclo
+                parser->arg_idx = 0;
+                parser->state = VSP_STATE_READ_LEN;
+                break; // riesegui il loop
 
-            case VSP_STATE_EXPECT_BULK_DATA:
-                // Dobbiamo leggere 'current_bulk_len' byte + 2 byte per '\r\n'
-                if (buffer_len(read_buf) < (size_t)parser->current_bulk_len + 2) {
-                    return VSP_PARSE_NEED_MORE_DATA; // Non abbiamo ancora tutti i dati + CRLF
+            case VSP_STATE_READ_LEN:
+                // In attesa di '$'
+                if (buffer_len(buf) < 1) return VSP_AGAIN;
+                
+                if (*(char*)buffer_peek(buf) != '$') {
+                    parser->state = VSP_STATE_ERROR;
+                    log_warn("Errore di protocollo: atteso '$', ricevuto '%c'", *(char*)buffer_peek(buf));
+                    return VSP_ERROR;
+                }
+                buffer_consume(buf, 1);
+                parser->state = VSP_STATE_READ_BULKLEN;
+                break; // riesegui il loop
+
+            case VSP_STATE_READ_BULKLEN:
+                // In attesa della lunghezza (es. "5\r\n")
+                line = vsp_read_line(buf);
+                if (!line) return VSP_AGAIN;
+
+                parser->bulk_len = atoi(line);
+                free(line);
+
+                if (parser->bulk_len < 0) {
+                    parser->state = VSP_STATE_ERROR;
+                    log_warn("Errore di protocollo: lunghezza bulk non valida (%d)", parser->bulk_len);
+                    return VSP_ERROR;
+                }
+                parser->state = VSP_STATE_READ_BULKDATA;
+                break; // riesegui il loop
+
+            case VSP_STATE_READ_BULKDATA:
+                // In attesa di N byte (dati) + \r\n
+                if (buffer_len(buf) < (size_t)parser->bulk_len + 2) {
+                    return VSP_AGAIN; // Dati incompleti
                 }
 
                 // Alloca e copia i dati
-                char *arg_data = malloc(parser->current_bulk_len + 1); // +1 per null terminator
-                if (arg_data == NULL) {
-                     log_error("Fallita allocazione arg_data: %s", strerror(errno));
-                     vsp_parser_reset(parser);
-                     return VSP_PARSE_ERROR;
-                }
-                
-                memcpy(arg_data, buffer_data(read_buf), parser->current_bulk_len);
-                arg_data[parser->current_bulk_len] = '\0'; // Rende la stringa C-compatibile
-                
-                // Controlla il CRLF finale
-                const char *data = buffer_data(read_buf);
-                if (data[parser->current_bulk_len] != '\r' || data[parser->current_bulk_len + 1] != '\n') {
-                    log_warn("Errore protocollo: \r\n mancante dopo i dati bulk");
-                    free(arg_data);
-                    vsp_parser_reset(parser);
-                    return VSP_PARSE_ERROR;
+                parser->argv[parser->arg_idx] = malloc(parser->bulk_len + 1);
+                if (!parser->argv[parser->arg_idx]) {
+                     log_error("vsp_parser: Impossibile allocare argomento (size: %d)", parser->bulk_len);
+                    parser->state = VSP_STATE_ERROR;
+                    return VSP_ERROR;
                 }
 
-                // Consuma i dati + CRLF
-                buffer_consume(read_buf, parser->current_bulk_len + 2);
+                memcpy(parser->argv[parser->arg_idx], buffer_peek(buf), parser->bulk_len);
+                parser->argv[parser->arg_idx][parser->bulk_len] = '\0';
+                
+                // Consuma i dati
+                buffer_consume(buf, parser->bulk_len);
+                
+                // Controlla \r\n finale
+                if (*(char*)buffer_peek(buf) != '\r' || *(char*)(buffer_peek(buf) + 1) != '\n') {
+                    log_warn("Errore di protocollo: \r\n mancante dopo i dati bulk.");
+                    parser->state = VSP_STATE_ERROR;
+                    return VSP_ERROR;
+                }
+                // Consuma \r\n
+                buffer_consume(buf, 2);
 
-                // Salva l'argomento
-                parser->argv[parser->current_arg_index] = arg_data;
-                parser->argl[parser->current_arg_index] = parser->current_bulk_len;
-                parser->current_arg_index++;
-
-                // Abbiamo finito di parsare tutti gli argomenti?
-                if (parser->current_arg_index == parser->current_arg_count) {
-                    // SÌ! Comando completo.
-                    // Esegui il comando
-                    server_execute_command(conn, parser->argv, parser->current_arg_count);
-                    
-                    // Resetta per il prossimo comando
-                    vsp_parser_reset(parser);
-                    // Continua il loop del 'while' se ci sono altri dati nel buffer
+                // Passa al prossimo argomento
+                parser->arg_idx++;
+                
+                if (parser->arg_idx == parser->argc) {
+                    // --- COMANDO COMPLETO ---
+                    *argc_out = parser->argc;
+                    *argv_out = parser->argv;
+                    vsp_parser_reset(parser); // Resetta per il prossimo comando
+                    return VSP_OK;
                 } else {
-                    // NO. Torna ad aspettare il prossimo bulk len
-                    parser->state = VSP_STATE_EXPECT_BULK_LEN;
+                    // Prossimo argomento
+                    parser->state = VSP_STATE_READ_LEN;
+                    break; // riesegui il loop
                 }
-                break;
-        } // fine switch(state)
-    } // fine while(buffer_len > 0)
+            
+            case VSP_STATE_ERROR:
+                return VSP_ERROR;
 
-    return VSP_PARSE_NEED_MORE_DATA; // Finiti i dati nel buffer
+            // Questi stati non dovrebbero essere raggiunti nel loop principale
+            case VSP_STATE_READ_CR:
+            case VSP_STATE_READ_LF:
+                parser->state = VSP_STATE_ERROR;
+                log_warn("Errore di stato del parser VSP.");
+                return VSP_ERROR;
+        }
+    }
 }

@@ -1,68 +1,74 @@
 /*
  * Vex Project: Header Server (Handle Opaco)
  * (include/server.h)
- *
- * MODIFICATO per Fase 6 (Astrazione Event Loop)
  */
-
 #ifndef VEX_SERVER_H
 #define VEX_SERVER_H
 
-#include <stddef.h> // per size_t
-// #include <stdint.h> // Non più necessario, gestito da event_loop.h
+#include <stdint.h> // Per tipi a larghezza fissa (usati da kqueue/epoll)
 
-// --- Handle Opaco ---
-typedef struct vex_server_ctx_s vex_server_t;
-
-// Forward declaration
-struct vex_connection_s;
-
-/**
- * @brief Crea un nuovo contesto server e inizia l'ascolto sulla porta.
- * @param port La porta su cui ascoltare (es. "6379").
- * @return Un puntatore all'handle del server, o NULL in caso di fallimento.
+/*
+ * Handle opachi per le strutture principali.
+ * Le definizioni complete si trovano nei rispettivi file .c
+ * Questo previene l'inquinamento dello scope e impone l'incapsulamento.
  */
-vex_server_t* server_create(const char *port);
+typedef struct vex_server_s vex_server_t;
+typedef struct vex_connection_s vex_connection_t;
+typedef struct event_loop_s event_loop_t;
+typedef struct hash_map_s hash_map_t; // <-- AGGIUNTO
+
 
 /**
- * @brief Avvia il loop eventi principale (Reactor).
- * Questa funzione blocca il thread (non ritorna mai).
- * @param server L'handle del server.
+ * @brief Crea una nuova istanza del server.
+ * * @param port La porta su cui mettersi in ascolto (come stringa, es. "6379").
+ * @return Un puntatore al nuovo vex_server_t o NULL in caso di errore.
  */
-void server_run(vex_server_t *server);
+vex_server_t* server_create(const char *port); // <-- CORREZIONE: da int a const char*
 
 /**
- * @brief Distrugge il server, chiude tutti i socket e libera le risorse.
- * @param server L'handle del server.
+ * @brief Avvia il loop eventi principale del server.
+ * Questa funzione blocca il thread corrente e gestisce l'I/O.
+ * * @param server Il server da avviare.
+ * @return 0 in caso di uscita normale, -1 in caso di errore critico.
+ */
+int server_run(vex_server_t *server);
+
+/**
+ * @brief Distrugge il server e libera tutte le risorse.
+ * * @param server Il server da distruggere.
  */
 void server_destroy(vex_server_t *server);
 
 /**
- * @brief (Interno) Rimuove una connessione dall'array di tracciamento del server.
- * Chiamato da connection_destroy.
- * @param server L'handle del server.
- * @param conn La connessione da rimuovere.
+ * @brief Aggiunge una nuova connessione client al server.
+ * (Questa funzione è "interna" al core, ma definita qui
+ * perché server.c ha bisogno di connection.h e viceversa)
+ * * @param server Il server.
+ * @param client_fd Il file descriptor del nuovo client.
+ * @return Il puntatore alla nuova connessione, o NULL.
  */
-void server_remove_connection(vex_server_t *server, struct vex_connection_s *conn);
-
-
-/*
- * RIMOSSO: server_register_event.
- * Tutta la registrazione degli eventi è ora gestita
- * dal modulo event_loop e chiamata internamente da server.c
- */
-// void server_register_event(vex_server_t *server, int fd, int16_t filter, uint16_t flags, void *udata);
-
+vex_connection_t* server_add_connection(vex_server_t *server, int client_fd);
 
 /**
- * @brief (Fase 2) Esegue un comando VSP che è stato parsato con successo.
- * Chiamato dal parser VSP.
- *
- * @param conn La connessione che ha inviato il comando.
- * @param argv Array di stringhe (argomenti del comando).
- * @param argc Numero di argomenti in argv.
+ * @brief Rimuove e distrugge una connessione client.
+ * * @param conn La connessione da rimuovere.
  */
-void server_execute_command(struct vex_connection_s *conn, char **argv, int argc);
+void server_remove_connection(vex_connection_t *conn);
+
+/**
+ * @brief Ottiene l'event loop associato al server.
+ * Usato da connection.c per registrare/deregistrare eventi.
+ * * @param server Il server.
+ * @return Il puntatore all'event_loop_t.
+ */
+event_loop_t* server_get_loop(vex_server_t *server);
+
+/**
+ * @brief Ottiene la cache L1 (hash map) associata al server.
+ * * @param server Il server.
+ * @return Il puntatore alla hash_map_t.
+ */
+hash_map_t* server_get_l1_cache(vex_server_t *server); // <-- AGGIUNTO
 
 
 #endif // VEX_SERVER_H
