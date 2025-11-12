@@ -13,28 +13,33 @@ LDFLAGS =
 LIBS =
 CPPFLAGS = -I$(INCLUDE_DIR)
 
+# --- Gestione Sorgenti (Robust) ---
+# 1. Trova TUTTI i file .c
+ALL_SRCS = $(shell find $(SRC_DIR) -name '*.c')
+
+# 2. Definisci i file che dipendono dalla piattaforma
+PLATFORM_SPECIFIC_SRCS = src/net/event_kqueue.c \
+                         src/net/event_epoll.c
+
+# 3. I sorgenti comuni sono TUTTI meno quelli specifici
+COMMON_SRCS = $(filter-out $(PLATFORM_SPECIFIC_SRCS), $(ALL_SRCS))
+
 # --- Rilevamento OS per Portabilità ---
-# Controlla l'Operating System (Darwin = macOS)
 OS := $(shell uname)
 
-# File sorgente comuni a tutte le piattaforme
-COMMON_SRCS = $(wildcard $(SRC_DIR)/core/*.c) \
-              $(wildcard $(SRC_DIR)/net/socket.c) \
-              $(wildcard $(SRC_DIR)/utils/*.c)
-
-# File sorgente specifici della piattaforma
+# 4. Seleziona il file corretto per QUESTA piattaforma
 ifeq ($(OS),Darwin)
-    PLATFORM_SRCS = src/net/event_kqueue.c
+    PLATFORM_SRC = src/net/event_kqueue.c
     CFLAGS += -D_DARWIN_C_SOURCE # Definisce per macOS
 else ifeq ($(OS),Linux)
-    PLATFORM_SRCS = src/net/event_epoll.c
+    PLATFORM_SRC = src/net/event_epoll.c
     CFLAGS += -D_GNU_SOURCE # Definisce per Linux (per epoll)
 else
     $(error Piattaforma $(OS) non supportata)
 endif
 
-# Lista sorgenti completa
-SRCS = $(COMMON_SRCS) $(PLATFORM_SRCS)
+# 5. Lista sorgenti completa
+SRCS = $(COMMON_SRCS) $(PLATFORM_SRC)
 
 # Genera i nomi dei file oggetto (es. obj/core/main.o)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
@@ -49,6 +54,8 @@ $(TARGET): $(OBJS)
 	@echo "LD   $@"
 	@$(CC) $(LDFLAGS) $^ -o $@ $(LIBS)
 
+# Regola di pattern per compilare i .o nelle loro sottodirectory obj/
+# (es. src/core/main.c -> obj/core/main.o)
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(@D)
 	@echo "CC   $<"
