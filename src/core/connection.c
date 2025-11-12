@@ -1,111 +1,108 @@
 /*
- * vecs Project: Implementazione Gestione Connessione
+ * Vex Project: Implementazione Gestione Connessione
  * (src/core/connection.c)
+ *
+ * MODIFICATO per Fase 6
+ * Aggiunto include per sockaddr_storage (necessario in server.c)
+ * e rimozione logica kqueue.
  */
 
 #include "connection.h"
-#include "server.h" // Include server.h per la definizione completa di vecs_server_ctx_s
+#include "server.h" 
 #include "logger.h"
+#include "vsp_parser.h"
+#include "event_loop.h" // Aggiunto per coerenza
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
 
-// Capacità iniziale dei buffer di I/O
+// Aggiunto per struct sockaddr_storage (usato in server.c)
+#include <sys/socket.h> 
+
 #define CONN_INITIAL_BUFFER_SIZE 1024
 
-// Struct interna (non visibile dall'header)
-struct vecs_connection_s
-{
+// Struct interna
+struct vex_connection_s {
     int fd;
-    struct vecs_server_ctx_s *server; // Puntatore al server proprietario
+    struct vex_server_ctx_s *server;
     connection_state_t state;
-
-    buffer_t *read_buf;  // Buffer per i dati letti dal client
-    buffer_t *write_buf; // Buffer per i dati da scrivere al client
-
-    // Qui andranno i dati specifici del parser VSP (Fase 2)
+    
+    buffer_t *read_buf;  
+    buffer_t *write_buf; 
+    
+    struct vsp_parser_s *parser;
 };
 
-vecs_connection_t *connection_create(int fd, struct vecs_server_ctx_s *server)
-{
-    vecs_connection_t *conn = malloc(sizeof(vecs_connection_t));
-    if (conn == NULL)
-    {
-        log_error("malloc fallito per vecs_connection_t: %s", strerror(errno));
+vex_connection_t* connection_create(int fd, struct vex_server_ctx_s *server) {
+    vex_connection_t *conn = malloc(sizeof(vex_connection_t));
+    if (conn == NULL) {
+        log_error("malloc fallito per vex_connection_t: %s", strerror(errno));
         return NULL;
     }
 
     conn->fd = fd;
     conn->server = server;
-    conn->state = CONN_STATE_NEW; // Stato iniziale
+    conn->state = CONN_STATE_NEW; 
 
     conn->read_buf = buffer_create(CONN_INITIAL_BUFFER_SIZE);
-    if (conn->read_buf == NULL)
-    {
-        log_error("Impossibile creare read_buf per conn (fd: %d)", fd);
-        free(conn);
-        return NULL;
-    }
-
     conn->write_buf = buffer_create(CONN_INITIAL_BUFFER_SIZE);
-    if (conn->write_buf == NULL)
-    {
-        log_error("Impossibile creare write_buf per conn (fd: %d)", fd);
-        buffer_destroy(conn->read_buf);
+    conn->parser = vsp_parser_create();
+    
+    if (conn->read_buf == NULL || conn->write_buf == NULL || conn->parser == NULL) {
+        log_error("Fallita creazione componenti connessione (fd: %d)", fd);
+        if (conn->read_buf) buffer_destroy(conn->read_buf);
+        if (conn->write_buf) buffer_destroy(conn->write_buf);
+        if (conn->parser) vsp_parser_destroy(conn->parser);
         free(conn);
         return NULL;
     }
-
-    // log_debug("Creata connessione (fd: %d)", fd); // Debug
+    
     return conn;
 }
 
-void connection_destroy(vecs_connection_t *conn)
-{
-    if (conn == NULL)
-        return;
+void connection_destroy(vex_connection_t *conn) {
+    if (conn == NULL) return;
+
+    // Imposta lo stato per evitare doppie chiusure
+    // (es. se un errore accade in read e poi in write nello stesso loop)
+    if(conn->state == CONN_STATE_CLOSING) return;
+    conn->state = CONN_STATE_CLOSING;
 
     log_info("Distruzione connessione (fd: %d)", conn->fd);
-
-    // Rimuove la connessione dall'array del server
-    // (Il server deve essere incluso per questo)
+    
+    // server_remove_connection ora si occupa di rimuovere 
+    // l'FD dal loop eventi (kqueue/epoll)
     server_remove_connection(conn->server, conn);
 
     close(conn->fd);
     buffer_destroy(conn->read_buf);
     buffer_destroy(conn->write_buf);
+    vsp_parser_destroy(conn->parser);
     free(conn);
 }
 
+
 // --- Getters e Setters ---
 
-int connection_get_fd(const vecs_connection_t *conn)
-{
+int connection_get_fd(const vex_connection_t *conn) {
     return conn->fd;
 }
-
-struct vecs_server_ctx_s *connection_get_server(const vecs_connection_t *conn)
-{
+struct vex_server_ctx_s* connection_get_server(const vex_connection_t *conn) {
     return conn->server;
 }
-
-buffer_t *connection_get_read_buffer(vecs_connection_t *conn)
-{
+buffer_t* connection_get_read_buffer(vex_connection_t *conn) {
     return conn->read_buf;
 }
-
-buffer_t *connection_get_write_buffer(vecs_connection_t *conn)
-{
+buffer_t* connection_get_write_buffer(vex_connection_t *conn) {
     return conn->write_buf;
 }
-
-connection_state_t connection_get_state(const vecs_connection_t *conn)
-{
+connection_state_t connection_get_state(const vex_connection_t *conn) {
     return conn->state;
 }
-
-void connection_set_state(vecs_connection_t *conn, connection_state_t state)
-{
+void connection_set_state(vex_connection_t *conn, connection_state_t state) {
     conn->state = state;
+}
+struct vsp_parser_s* connection_get_parser(const vex_connection_t *conn) {
+    return conn->parser;
 }

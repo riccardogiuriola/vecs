@@ -1,5 +1,5 @@
 /*
- * vecs Project: Implementazione Logger
+ * vex Project: Implementazione Logger
  * (src/utils/logger.c)
  */
 

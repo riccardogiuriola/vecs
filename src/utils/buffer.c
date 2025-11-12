@@ -1,5 +1,5 @@
 /*
- * vecs Project: Implementazione Buffer Dinamico
+ * vex Project: Implementazione Buffer Dinamico
  * (src/utils/buffer.c)
  */
 

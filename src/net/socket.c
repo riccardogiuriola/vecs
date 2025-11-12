@@ -1,5 +1,5 @@
 /*
- * vecs Project: Implementazione Socket
+ * vex Project: Implementazione Socket
  * (src/net/socket.c)
  */
 

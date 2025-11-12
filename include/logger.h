@@ -1,5 +1,5 @@
-#ifndef vecs_LOGGER_H
-#define vecs_LOGGER_H
+#ifndef vex_LOGGER_H
+#define vex_LOGGER_H
 
 #include <stdarg.h>
 
@@ -38,4 +38,4 @@ void logger_log(log_level_t level, const char *file, int line, const char *fmt, 
 #define log_error(...) logger_log(LOG_ERROR, __FILE__, __LINE__, __VA_ARGS__)
 #define log_fatal(...) logger_log(LOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
 
-#endif // vecs_LOGGER_H
+#endif // vex_LOGGER_H

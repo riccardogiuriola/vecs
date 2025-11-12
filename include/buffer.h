@@ -1,13 +1,13 @@
 /*
- * vecs Project: Header Buffer Dinamico
+ * vex Project: Header Buffer Dinamico
  * (include/buffer.h)
  *
  * Un semplice buffer dinamico (stile sds di Redis).
  * NON è sicuro per i thread, pensato per l'uso single-threaded.
  */
 
-#ifndef vecs_BUFFER_H
-#define vecs_BUFFER_H
+#ifndef vex_BUFFER_H
+#define vex_BUFFER_H
 
 #include <stddef.h> // per size_t
 
@@ -71,4 +71,4 @@ size_t buffer_available(const buffer_t *buf);
  */
 void buffer_clear(buffer_t *buf);
 
-#endif // vecs_BUFFER_H
+#endif // vex_BUFFER_H

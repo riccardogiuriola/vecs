@@ -1,10 +1,10 @@
 /*
- * vecs Project: Header Socket
+ * vex Project: Header Socket
  * (include/socket.h)
  */
 
-#ifndef vecs_SOCKET_H
-#define vecs_SOCKET_H
+#ifndef vex_SOCKET_H
+#define vex_SOCKET_H
 
 /**
  * @brief Crea un socket TCP, lo imposta come non-bloccante,
@@ -22,4 +22,4 @@ int socket_create_and_listen(const char *port, int backlog);
  */
 int socket_set_non_blocking(int fd);
 
-#endif // vecs_SOCKET_H
+#endif // vex_SOCKET_H

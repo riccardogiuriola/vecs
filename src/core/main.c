@@ -1,5 +1,5 @@
 /*
- * vecs Project: Entry Point Main
+ * vex Project: Entry Point Main
  * (src/core/main.c)
  */
 
@@ -14,10 +14,10 @@ int main(void) {
     // Imposta il livello di log (opzionale, default è INFO)
     logger_set_level(LOG_DEBUG);
 
-    log_info("Avvio di vecs Semantic Cache Proxy...");
+    log_info("Avvio di vex Semantic Cache Proxy...");
 
     // 1. Crea il server (alloca contesto, apre kqueue, bind+listen socket)
-    vecs_server_t *server = server_create(DEFAULT_PORT);
+    vex_server_t *server = server_create(DEFAULT_PORT);
 
     if (server == NULL) {
         // log_fatal è già stato chiamato da server_create o dalle sue dipendenze

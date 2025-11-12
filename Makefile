@@ -1,65 +1,61 @@
 #
-# vecs Project: Makefile
+# Vex Project: Makefile
 #
 
-# Makefile per vecs - C Event-Driven Server
-
 # --- Variabili ---
-# Compilatore e flag
 CC = clang
-# Flag C rigorosi (C11 standard, debug, ottimizzazioni O2, tutti i warning, errori)
 CFLAGS = -Wall -Wextra -Werror -std=c11 -g -O2
-# Flag C aggiuntivi per lo sviluppo (più pedanti)
-# CFLAGS += -Wpedantic -Wshadow -Wpointer-arith -Wcast-qual -Wstrict-prototypes
-
-# Directory
 INCLUDE_DIR = include
 SRC_DIR = src
 OBJ_DIR = obj
+TARGET = vex
+LDFLAGS =
+LIBS =
+CPPFLAGS = -I$(INCLUDE_DIR)
 
-# Eseguibile
-TARGET = vecs
+# --- Rilevamento OS per Portabilità ---
+# Controlla l'Operating System (Darwin = macOS)
+OS := $(shell uname)
 
-# Trova automaticamente i file sorgente
-# AGGIUNTO: src/utils/buffer.c e src/core/connection.c
-SRCS = $(wildcard $(SRC_DIR)/core/*.c) \
-       $(wildcard $(SRC_DIR)/net/*.c) \
-       $(wildcard $(SRC_DIR)/utils/*.c)
+# File sorgente comuni a tutte le piattaforme
+COMMON_SRCS = $(wildcard $(SRC_DIR)/core/*.c) \
+              $(wildcard $(SRC_DIR)/net/socket.c) \
+              $(wildcard $(SRC_DIR)/utils/*.c)
+
+# File sorgente specifici della piattaforma
+ifeq ($(OS),Darwin)
+    PLATFORM_SRCS = src/net/event_kqueue.c
+    CFLAGS += -D_DARWIN_C_SOURCE # Definisce per macOS
+else ifeq ($(OS),Linux)
+    PLATFORM_SRCS = src/net/event_epoll.c
+    CFLAGS += -D_GNU_SOURCE # Definisce per Linux (per epoll)
+else
+    $(error Piattaforma $(OS) non supportata)
+endif
+
+# Lista sorgenti completa
+SRCS = $(COMMON_SRCS) $(PLATFORM_SRCS)
 
 # Genera i nomi dei file oggetto (es. obj/core/main.o)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
 
-# Flag per il Linker (nessuna libreria esterna per ora)
-LDFLAGS =
-LIBS =
-
-# Include path per il compilatore
-CPPFLAGS = -I$(INCLUDE_DIR)
 
 # --- Target ---
+.PHONY: all clean re
 
-# Target di default: compila l'eseguibile
 all: $(TARGET)
 
-# Linka l'eseguibile
 $(TARGET): $(OBJS)
 	@echo "LD   $@"
 	@$(CC) $(LDFLAGS) $^ -o $@ $(LIBS)
 
-# Compila i file oggetto
-# Crea le directory degli oggetti (es. obj/core) prima di compilare
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(@D)
 	@echo "CC   $<"
 	@$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
-# Target di pulizia
 clean:
 	@echo "CLEAN"
 	@rm -rf $(OBJ_DIR) $(TARGET)
 
-# Target per forzare una ricompilazione
 re: clean all
-
-# Phony targets (non sono file)
-.PHONY: all clean re
