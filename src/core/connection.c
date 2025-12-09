@@ -1,21 +1,18 @@
 /*
  * Vex Project: Implementazione Gestione Connessione
  * (src/core/connection.c)
- *
- * --- AGGIORNATO (Fase 3/Fix) ---
- * Corretti typedef, enum e logica destroy.
  */
 
 #include "connection.h"
 #include "server.h" 
 #include "logger.h"
-#include "vsp_parser.h" // Aggiunto per completezza
-#include "buffer.h"     // Aggiunto per completezza
+#include "vsp_parser.h" 
+#include "buffer.h"     
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
-#include <sys/socket.h> // Incluso per sockaddr_storage (buona pratica)
+#include <sys/socket.h>
 
 
 #define CONN_INITIAL_BUFFER_SIZE 1024
@@ -23,16 +20,16 @@
 // Struct interna
 struct vex_connection_s {
     int fd;
-    vex_server_t *server; // <-- CORREZIONE (era vex_server_ctx_s)
-    vex_connection_state_t state; // <-- CORREZIONE (era connection_state_t)
+    vex_server_t *server;
+    vex_connection_state_t state;
     
     buffer_t *read_buf;  
     buffer_t *write_buf; 
     
-    vsp_parser_t *parser; // <-- CORREZIONE (era struct vsp_parser_s)
+    vsp_parser_t *parser;
 };
 
-vex_connection_t* connection_create(vex_server_t *server, int fd) { // <-- CORREZIONE
+vex_connection_t* connection_create(vex_server_t *server, int fd) {
     vex_connection_t *conn = malloc(sizeof(vex_connection_t));
     if (conn == NULL) {
         log_error("malloc fallito per vex_connection_t: %s", strerror(errno));
@@ -41,7 +38,7 @@ vex_connection_t* connection_create(vex_server_t *server, int fd) { // <-- CORRE
 
     conn->fd = fd;
     conn->server = server;
-    conn->state = STATE_READING; // <-- CORREZIONE (era CONN_STATE_NEW)
+    conn->state = STATE_READING;
 
     conn->read_buf = buffer_create(CONN_INITIAL_BUFFER_SIZE);
     conn->write_buf = buffer_create(CONN_INITIAL_BUFFER_SIZE);
@@ -67,8 +64,6 @@ void connection_destroy(vex_connection_t *conn) {
 
     log_debug("Distruzione connessione (fd: %d)", conn->fd);
     
-    // --- CORREZIONE Logica ---
-    // connection_destroy ora fa solo pulizia.
     // server_remove_connection (in server.c) si occupa di 
     // rimuovere da epoll e dal pool.
     
@@ -84,10 +79,10 @@ void connection_destroy(vex_connection_t *conn) {
 
 // --- Getters e Setters ---
 
-int connection_get_fd(vex_connection_t *conn) { // <-- CORREZIONE (const rimosso)
+int connection_get_fd(vex_connection_t *conn) {
     return conn->fd;
 }
-vex_server_t* connection_get_server(vex_connection_t *conn) { // <-- CORREZIONE
+vex_server_t* connection_get_server(vex_connection_t *conn) {
     return conn->server;
 }
 buffer_t* connection_get_read_buffer(vex_connection_t *conn) {
@@ -97,49 +92,13 @@ buffer_t* connection_get_write_buffer(vex_connection_t *conn) {
     return conn->write_buf;
 }
 
-/*
- * BLOCCO DA RIMUOVERE:
- * Queste sono le vecchie definizioni con i tipi errati
- * che causano gli errori di IntelliSense.
- */
-/*
-connection_state_t connection_get_state(const vex_connection_t *conn) {
-    return conn->state;
-}
-void connection_set_state(vex_connection_t *conn, connection_state_t state) {
-    conn->state = state;
-}
-struct vsp_parser_s* connection_get_parser(const vex_connection_t *conn) {
-    return conn->parser;
-}
-*/
-// --- FINE BLOCCO DA RIMUOVERE ---
-
-
-vsp_parser_t* connection_get_parser(vex_connection_t *conn) { // <-- CORREZIONE
+vsp_parser_t* connection_get_parser(vex_connection_t *conn) {
     return conn->parser;
 }
 
-/*
- * BLOCCO DA RIMUOVERE:
- * Queste sono le vecchie definizioni con i tipi errati
- * che causano gli errori di IntelliSense.
- */
-/*
-connection_state_t connection_get_state(const vex_connection_t *conn) {
+vex_connection_state_t connection_get_state(vex_connection_t *conn) {
     return conn->state;
 }
-void connection_set_state(vex_connection_t *conn, connection_state_t state) {
-    conn->state = state;
-}
-struct vsp_parser_s* connection_get_parser(const vex_connection_t *conn) {
-    return conn->parser;
-}
-*/
-
-vex_connection_state_t connection_get_state(vex_connection_t *conn) { // <-- CORREZIONE
-    return conn->state;
-}
-void connection_set_state(vex_connection_t *conn, vex_connection_state_t state) { // <-- CORREZIONE
+void connection_set_state(vex_connection_t *conn, vex_connection_state_t state) {
     conn->state = state;
 }

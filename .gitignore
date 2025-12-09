@@ -15,3 +15,8 @@ bin/
 vex
 
 obj
+
+models
+
+*.py
+*.txt

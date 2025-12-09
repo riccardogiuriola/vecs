@@ -1,8 +1,6 @@
 /*
  * Vex Project: Implementazione Epoll (Linux)
  * (src/net/event_epoll.c)
- *
- * Implementazione dell'API event_loop per Linux usando epoll.
  */
 
 // Questo file viene compilato solo su Linux (vedi Makefile)

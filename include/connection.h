@@ -12,7 +12,7 @@
  * Usiamo la forward declaration corretta per vex_server_t
  * che corrisponde a quella in server.h
  */
-typedef struct vex_server_s vex_server_t; // <-- CORREZIONE: Era vex_server_ctx_s
+typedef struct vex_server_s vex_server_t;
 typedef struct vex_connection_s vex_connection_t;
 typedef struct vsp_parser_s vsp_parser_t;
 typedef struct buffer_s buffer_t;

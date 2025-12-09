@@ -1,12 +1,6 @@
 /*
  * Vex Project: Header Buffer Dinamico
  * (include/buffer.h)
- *
- * Un semplice buffer dinamico (stile sds di Redis).
- * NON è sicuro per i thread, pensato per l'uso single-threaded.
- *
- * --- AGGIORNATO (Fase 3/Fix) ---
- * Aggiunte funzioni di I/O e helper.
  */
 
 #ifndef VEX_BUFFER_H

@@ -1,8 +1,6 @@
 /*
  * Vex Project: Implementazione Kqueue (macOS)
  * (src/net/event_kqueue.c)
- *
- * Implementazione dell'API event_loop per macOS/BSD usando kqueue.
  */
 
 // Questo file viene compilato solo su macOS (vedi Makefile)
@@ -20,7 +18,7 @@
 #include <sys/time.h>
 
 // Struct interna (definizione dell'handle opaco)
-struct event_loop_s { // <-- CORREZIONE (rimosso vex_)
+struct event_loop_s {
     int kq_fd;             // File descriptor di kqueue
     int max_events;
     struct kevent *events; // Array per gli eventi restituiti da kevent
@@ -32,10 +30,6 @@ static int el_kqueue_ctl(int kq_fd, int fd, int16_t filter, uint16_t flags, void
     EV_SET(&change, fd, filter, flags, 0, 0, udata);
     
     if (kevent(kq_fd, &change, 1, NULL, 0, NULL) == -1) {
-        // CORREZIONE: Se stiamo CANCELLANDO (EV_DELETE) e l'FD
-        // non è stato trovato (ENOENT), non è un errore fatale.
-        // Succede se proviamo a cancellare EVFILT_WRITE su un FD
-        // che era registrato solo per EVFILT_READ.
         if ((flags & EV_DELETE) && errno == ENOENT) {
             log_debug("kevent() ctl: Ignorato ENOENT (benigno) su EV_DELETE (fd: %d, filter: %d)", fd, filter);
             return 0; // Non è un errore
@@ -50,8 +44,8 @@ static int el_kqueue_ctl(int kq_fd, int fd, int16_t filter, uint16_t flags, void
 
 // --- Implementazione API Pubblica ---
 
-event_loop_t* el_create(int max_events) { // <-- CORREZIONE
-    event_loop_t *loop = malloc(sizeof(event_loop_t)); // <-- CORREZIONE
+event_loop_t* el_create(int max_events) {
+    event_loop_t *loop = malloc(sizeof(event_loop_t));
     if (loop == NULL) {
         log_error("malloc fallito per event_loop: %s", strerror(errno));
         return NULL;
@@ -77,14 +71,14 @@ event_loop_t* el_create(int max_events) { // <-- CORREZIONE
     return loop;
 }
 
-void el_destroy(event_loop_t *loop) { // <-- CORREZIONE
+void el_destroy(event_loop_t *loop) {
     if (loop == NULL) return;
     close(loop->kq_fd);
     free(loop->events);
     free(loop);
 }
 
-int el_poll(event_loop_t *loop, vex_event_t *active_events, int timeout_ms) { // <-- CORREZIONE
+int el_poll(event_loop_t *loop, vex_event_t *active_events, int timeout_ms) {
     struct timespec timeout;
     struct timespec *timeout_ptr = NULL;
     
@@ -138,12 +132,12 @@ int el_poll(event_loop_t *loop, vex_event_t *active_events, int timeout_ms) { //
     return num_events;
 }
 
-int el_add_fd_read(event_loop_t *loop, int fd, void *udata) { // <-- CORREZIONE
+int el_add_fd_read(event_loop_t *loop, int fd, void *udata) {
     // Aggiunge l'evento di lettura (EV_ADD) e lo abilita (EV_ENABLE)
     return el_kqueue_ctl(loop->kq_fd, fd, EVFILT_READ, EV_ADD | EV_ENABLE, udata);
 }
 
-int el_del_fd(event_loop_t *loop, int fd) { // <-- CORREZIONE
+int el_del_fd(event_loop_t *loop, int fd) {
     // kqueue rimuove tutti i filtri per un FD se non specificato
     // Per sicurezza, rimuoviamo esplicitamente lettura e scrittura
     el_kqueue_ctl(loop->kq_fd, fd, EVFILT_READ, EV_DELETE, NULL);
@@ -151,12 +145,12 @@ int el_del_fd(event_loop_t *loop, int fd) { // <-- CORREZIONE
     return 0;
 }
 
-int el_enable_write(event_loop_t *loop, int fd, void *udata) { // <-- CORREZIONE
+int el_enable_write(event_loop_t *loop, int fd, void *udata) {
     // Aggiunge/abilita il filtro di scrittura
     return el_kqueue_ctl(loop->kq_fd, fd, EVFILT_WRITE, EV_ADD | EV_ENABLE, udata);
 }
 
-int el_disable_write(event_loop_t *loop, int fd, void *udata) { // <-- CORREZIONE
+int el_disable_write(event_loop_t *loop, int fd, void *udata) {
     (void)udata; // Non usato da kqueue
     // Rimuove/disabilita il filtro di scrittura
     return el_kqueue_ctl(loop->kq_fd, fd, EVFILT_WRITE, EV_DELETE, NULL);

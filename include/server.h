@@ -23,7 +23,7 @@ typedef struct hash_map_s hash_map_t; // <-- AGGIUNTO
  * * @param port La porta su cui mettersi in ascolto (come stringa, es. "6379").
  * @return Un puntatore al nuovo vex_server_t o NULL in caso di errore.
  */
-vex_server_t* server_create(const char *port); // <-- CORREZIONE: da int a const char*
+vex_server_t* server_create(const char *port);
 
 /**
  * @brief Avvia il loop eventi principale del server.

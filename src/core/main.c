@@ -5,13 +5,12 @@
 
 #include "server.h"
 #include "logger.h"
-#include <stdlib.h> // Per EXIT_SUCCESS, EXIT_FAILURE
+#include <stdlib.h>
 
-// Porta di default, stile Redis
 #define DEFAULT_PORT "6379"
 
 int main(void) {
-    // Imposta il livello di log (opzionale, default è INFO)
+    // Imposta il livello di log
     logger_set_level(LOG_DEBUG);
 
     log_info("Avvio di vex Semantic Cache Proxy...");

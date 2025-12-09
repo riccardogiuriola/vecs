@@ -1,7 +1,6 @@
 /*
  * Vex Project: Implementazione VSP Parser
  * (src/core/vsp_parser.c)
- * * Riscritto per l'API Fase 3 (restituisce argc/argv)
  */
 
 #include "vsp_parser.h"
