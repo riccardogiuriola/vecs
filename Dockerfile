@@ -28,7 +28,7 @@ RUN mkdir -p models && \
 RUN make libs
 
 # 4. Build Server
-RUN make
+RUN make -j$(nproc)
 
 # ==========================================
 # Stage 2: Runtime (Minimal)

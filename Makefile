@@ -90,9 +90,10 @@ libs:
 		-DBUILD_SHARED_LIBS=OFF \
 		-DLLAMA_BUILD_EXAMPLES=OFF \
 		-DLLAMA_BUILD_TESTS=OFF \
+		-DLLAMA_BUILD_SERVER=OFF \
 		-DLLAMA_CURL=OFF \
 		-DGGML_NATIVE=OFF \
-		&& cmake --build build --config Release
+		&& cmake --build build --config Release --target llama -j
 
 clean:
 	@echo "CLEAN"

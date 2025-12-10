@@ -14,11 +14,13 @@ Instead of forwarding every prompt to the costly LLM API, Vecs checks if a seman
 
 - **🚀 Native Performance:** Written in pure C with zero runtime dependencies (no Python required).
 
-- **🧠 Dual-Layer Caching:**
+🧠 Smart Dual-Layer Caching:
 
-  - **L1 (Exact Match):** $O(1)$ Hash Map for instant retrieval of identical queries.
+- **L1 (Exact Match):** O(1) Hash Map with text normalization (ignores case & punctuation) for instant retrieval.
+- **L2 (Hybrid Semantic):** Not just vector search!
 
-  - **L2 (Semantic Match):** Local Vector Search using embeddings to find similar concepts.
+  - **Mean Pooling:** Uses state-of-the-art embedding aggregation (not just the [CLS] token) for higher accuracy.
+  - **Hybrid Filtering:** Performs keyword analysis to detect negations ("I want..." vs "I do NOT want...") and length mismatch, drastically reducing false positives.
 
 - **⚡ Hardware Acceleration:**
 
@@ -33,6 +35,9 @@ Instead of forwarding every prompt to the costly LLM API, Vecs checks if a seman
 - **🔌 VSP Protocol:** Simple, text-based TCP protocol (Redis-like).
 
 ## 🛠️ Architecture
+
+🤖 **Model Support:**
+Vecs automatically detects the model architecture (Encoder-only vs Decoder) to use the correct inference method. It is optimized for modern embedding models like **BGE-M3**, **E5**, and **Nomic-Embed**.
 
 ```
 graph TD
