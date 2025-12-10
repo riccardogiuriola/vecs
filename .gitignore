@@ -1,7 +1,6 @@
 *.o
 *.out
 $(TARGET)
-vecs
 
 build/
 bin/
