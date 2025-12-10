@@ -1,7 +1,7 @@
 *.o
 *.out
 $(TARGET)
-vex
+vecs
 
 build/
 bin/
@@ -12,7 +12,7 @@ bin/
 
 .vscode
 
-vex
+vecs
 
 obj
 

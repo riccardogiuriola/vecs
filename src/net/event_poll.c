@@ -1,5 +1,5 @@
 /*
- * Vex Project: Implementazione Epoll (Linux)
+ * Vecs Project: Implementazione Epoll (Linux)
  * (src/net/event_poll.c)
  */
 
@@ -70,7 +70,7 @@ void el_destroy(event_loop_t *loop) {
     free(loop);
 }
 
-int el_poll(event_loop_t *loop, vex_event_t *active_events, int timeout_ms) {
+int el_poll(event_loop_t *loop, vecs_event_t *active_events, int timeout_ms) {
     
     // Attende gli eventi
     int num_events = epoll_wait(loop->epoll_fd, loop->events, loop->max_events, timeout_ms);
@@ -84,7 +84,7 @@ int el_poll(event_loop_t *loop, vex_event_t *active_events, int timeout_ms) {
     // Traduce gli eventi epoll nel nostro formato astratto
     for (int i = 0; i < num_events; i++) {
         struct epoll_event *e = &loop->events[i];
-        vex_event_t *ve = &active_events[i];
+        vecs_event_t *ve = &active_events[i];
         
         ve->udata = e->data.ptr;
         ve->fd = -1; // Non disponibile direttamente in data.ptr se usiamo puntatori

@@ -1,5 +1,5 @@
 /*
- * Vex Project: Implementazione Hash Map (Cache L1)
+ * Vecs Project: Implementazione Hash Map (Cache L1)
  * (src/cache/hash_map.c)
  * * Implementazione semplice con separate chaining.
  */

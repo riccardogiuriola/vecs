@@ -1,5 +1,5 @@
 /*
- * Vex Project: Implementazione VSP Parser
+ * Vecs Project: Implementazione VSP Parser
  * (src/core/vsp_parser.c)
  */
 

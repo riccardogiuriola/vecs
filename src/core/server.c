@@ -1,5 +1,5 @@
 /*
- * Vex Project: Implementazione Server (Reactor Kqueue + Semantic Cache)
+ * Vecs Project: Implementazione Server (Reactor Kqueue + Semantic Cache)
  * (src/core/server.c)
  * * Includes: Env Configuration, L1 Cache, L2 Cache (Vector Search)
  */
@@ -26,7 +26,7 @@
 // Configurazioni Statiche
 #define MAX_FD 65536
 #define MAX_EVENTS 64
-#define VEX_BACKLOG 128
+#define VECS_BACKLOG 128
 #define MAX_L1_KEY_SIZE 8192
 
 // --- DEFAULTS (Fallback se ENV non settate) ---
@@ -47,18 +47,18 @@ typedef struct {
     float l2_threshold;
     float l2_dedupe_threshold;
     int l2_capacity;
-} vex_config_t;
+} vecs_config_t;
 
 /**
  * @brief Struttura interna del Server
  */
-struct vex_server_s {
+struct vecs_server_s {
     const char *port;
     int listen_fd;
     event_loop_t *loop;
     
     // Configurazione Dinamica
-    vex_config_t config;
+    vecs_config_t config;
 
     // --- CACHE LAYERS ---
     hash_map_t *l1_cache;        // L1: Exact Match
@@ -69,8 +69,8 @@ struct vex_server_s {
     int vector_dim;              // Dimensione vettori (letto dal modello)
 
     // Gestione connessioni
-    vex_connection_t *connections[MAX_FD];
-    vex_event_t *events;
+    vecs_connection_t *connections[MAX_FD];
+    vecs_event_t *events;
 };
 
 // --- Helpers per ENV ---
@@ -93,18 +93,18 @@ static int get_env_int(const char* key, const char* default_val) {
 }
 
 // --- Prototipi Funzioni Statiche ---
-static void server_handle_client_event(vex_event_t *event);
-static void server_handle_new_connection(vex_server_t *server);
-static void server_handle_client_read(vex_connection_t *conn);
-static void server_handle_client_write(vex_connection_t *conn);
-static void server_execute_command(vex_connection_t *conn, int argc, char **argv);
-void server_remove_connection(vex_connection_t *conn);
+static void server_handle_client_event(vecs_event_t *event);
+static void server_handle_new_connection(vecs_server_t *server);
+static void server_handle_client_read(vecs_connection_t *conn);
+static void server_handle_client_write(vecs_connection_t *conn);
+static void server_execute_command(vecs_connection_t *conn, int argc, char **argv);
+void server_remove_connection(vecs_connection_t *conn);
 
 
 // --- Gestori Eventi (Network) ---
 
-static void server_handle_client_event(vex_event_t *event) {
-    vex_connection_t *conn = (vex_connection_t*)event->udata;
+static void server_handle_client_event(vecs_event_t *event) {
+    vecs_connection_t *conn = (vecs_connection_t*)event->udata;
 
     if (conn == NULL || connection_get_fd(conn) == -1) {
         return;
@@ -128,7 +128,7 @@ static void server_handle_client_event(vex_event_t *event) {
     }
 }
 
-static void server_handle_new_connection(vex_server_t *server) {
+static void server_handle_new_connection(vecs_server_t *server) {
     struct sockaddr_storage client_addr;
     socklen_t addr_len = sizeof(client_addr);
     int client_fd;
@@ -152,7 +152,7 @@ static void server_handle_new_connection(vex_server_t *server) {
     }
 }
 
-static void server_handle_client_read(vex_connection_t *conn) {
+static void server_handle_client_read(vecs_connection_t *conn) {
     int fd = connection_get_fd(conn);
     buffer_t *read_buf = connection_get_read_buffer(conn);
     vsp_parser_t *parser = connection_get_parser(conn);
@@ -189,7 +189,7 @@ static void server_handle_client_read(vex_connection_t *conn) {
     }
 }
 
-static void server_handle_client_write(vex_connection_t *conn) {
+static void server_handle_client_write(vecs_connection_t *conn) {
     int fd = connection_get_fd(conn);
     buffer_t *write_buf = connection_get_write_buffer(conn);
     ssize_t write_result;
@@ -206,7 +206,7 @@ static void server_handle_client_write(vex_connection_t *conn) {
     }
     
     if (buffer_len(write_buf) == 0) {
-        vex_server_t *server = connection_get_server(conn);
+        vecs_server_t *server = connection_get_server(conn);
         el_disable_write(server->loop, fd, (void*)conn);
         
         if (connection_get_state(conn) == STATE_CLOSING) {
@@ -217,10 +217,10 @@ static void server_handle_client_write(vex_connection_t *conn) {
 
 // --- CORE LOGIC: L1 & L2 CACHE (Configurable) ---
 
-static void server_execute_command(vex_connection_t *conn, int argc, char **argv) {
+static void server_execute_command(vecs_connection_t *conn, int argc, char **argv) {
     if (conn == NULL || argc == 0) return;
 
-    vex_server_t *server = connection_get_server(conn);
+    vecs_server_t *server = connection_get_server(conn);
     buffer_t *write_buf = connection_get_write_buffer(conn);
     hash_map_t *l1_cache = server->l1_cache;
     int fd = connection_get_fd(conn);
@@ -365,11 +365,11 @@ static void server_execute_command(vex_connection_t *conn, int argc, char **argv
 
 // --- Init & Lifecycle ---
 
-vex_server_t* server_create(const char *port) {
-    vex_server_t *server = calloc(1, sizeof(vex_server_t));
+vecs_server_t* server_create(const char *port) {
+    vecs_server_t *server = calloc(1, sizeof(vecs_server_t));
     if (!server) return NULL;
     
-    server->events = calloc(MAX_EVENTS, sizeof(vex_event_t));
+    server->events = calloc(MAX_EVENTS, sizeof(vecs_event_t));
     if (!server->events) {
         free(server);
         return NULL;
@@ -378,12 +378,12 @@ vex_server_t* server_create(const char *port) {
     server->port = port;
 
     // --- CARICAMENTO CONFIGURAZIONE DA ENV ---
-    strncpy(server->config.model_path, get_env_string("VEX_MODEL_PATH", DEFAULT_MODEL_PATH), 511);
-    server->config.l2_threshold = get_env_float("VEX_L2_THRESHOLD", DEFAULT_L2_THRESHOLD);
-    server->config.l2_dedupe_threshold = get_env_float("VEX_L2_DEDUPE_THRESHOLD", DEFAULT_L2_DEDUPE);
-    server->config.l2_capacity = get_env_int("VEX_L2_CAPACITY", DEFAULT_L2_CAPACITY);
+    strncpy(server->config.model_path, get_env_string("VECS_MODEL_PATH", DEFAULT_MODEL_PATH), 511);
+    server->config.l2_threshold = get_env_float("VECS_L2_THRESHOLD", DEFAULT_L2_THRESHOLD);
+    server->config.l2_dedupe_threshold = get_env_float("VECS_L2_DEDUPE_THRESHOLD", DEFAULT_L2_DEDUPE);
+    server->config.l2_capacity = get_env_int("VECS_L2_CAPACITY", DEFAULT_L2_CAPACITY);
 
-    log_info("=== VEX CONFIG ===");
+    log_info("=== VECS CONFIG ===");
     log_info("Model Path:   %s", server->config.model_path);
     log_info("L2 Threshold: %.2f", server->config.l2_threshold);
     log_info("L2 Dedupe:    %.2f", server->config.l2_dedupe_threshold);
@@ -427,7 +427,7 @@ vex_server_t* server_create(const char *port) {
     }
 
     // 6. Socket Listener
-    server->listen_fd = socket_create_and_listen(port, VEX_BACKLOG);
+    server->listen_fd = socket_create_and_listen(port, VECS_BACKLOG);
     if (server->listen_fd < 0) {
         log_fatal("Impossibile fare bind su porta %s", port);
         return NULL;
@@ -438,11 +438,11 @@ vex_server_t* server_create(const char *port) {
         return NULL;
     }
 
-    log_info("Vex Server avviato. Listening :%s. Vector Dim: %d", port, server->vector_dim);
+    log_info("Vecs Server avviato. Listening :%s. Vector Dim: %d", port, server->vector_dim);
     return server;
 }
 
-void server_destroy(vex_server_t *server) {
+void server_destroy(vecs_server_t *server) {
     if (server == NULL) return;
 
     log_info("Arresto server...");
@@ -470,7 +470,7 @@ void server_destroy(vex_server_t *server) {
     log_info("Server terminato.");
 }
 
-int server_run(vex_server_t *server) {
+int server_run(vecs_server_t *server) {
     log_info("Loop eventi in esecuzione...");
 
     while (1) {
@@ -483,7 +483,7 @@ int server_run(vex_server_t *server) {
         }
 
         for (int i = 0; i < num_events; i++) {
-            vex_event_t *event = &server->events[i];
+            vecs_event_t *event = &server->events[i];
             
             if (event->udata == server) {
                 server_handle_new_connection(server);
@@ -495,13 +495,13 @@ int server_run(vex_server_t *server) {
     return 0;
 }
 
-vex_connection_t* server_add_connection(vex_server_t *server, int client_fd) {
+vecs_connection_t* server_add_connection(vecs_server_t *server, int client_fd) {
     if (socket_set_non_blocking(client_fd) == -1) {
         close(client_fd);
         return NULL;
     }
     
-    vex_connection_t *conn = connection_create(server, client_fd);
+    vecs_connection_t *conn = connection_create(server, client_fd);
     if (conn == NULL) {
         close(client_fd);
         return NULL;
@@ -518,10 +518,10 @@ vex_connection_t* server_add_connection(vex_server_t *server, int client_fd) {
     return conn;
 }
 
-void server_remove_connection(vex_connection_t *conn) {
+void server_remove_connection(vecs_connection_t *conn) {
     if (conn == NULL) return;
     
-    vex_server_t *server = connection_get_server(conn);
+    vecs_server_t *server = connection_get_server(conn);
     int fd = connection_get_fd(conn);
 
     if (fd == -1) return;
@@ -535,10 +535,10 @@ void server_remove_connection(vex_connection_t *conn) {
     connection_destroy(conn);
 }
 
-event_loop_t* server_get_loop(vex_server_t *server) {
+event_loop_t* server_get_loop(vecs_server_t *server) {
     return server->loop;
 }
 
-hash_map_t* server_get_l1_cache(vex_server_t *server) {
+hash_map_t* server_get_l1_cache(vecs_server_t *server) {
     return server->l1_cache;
 }

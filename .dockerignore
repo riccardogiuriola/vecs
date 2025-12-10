@@ -2,7 +2,7 @@
 .vscode
 .DS_Store
 obj/
-vex
+vecs
 # Ignore local models (Docker will download its own)
 models/
 # CRITICAL: Ignore local build artifacts of llama.cpp

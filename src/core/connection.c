@@ -1,5 +1,5 @@
 /*
- * Vex Project: Implementazione Gestione Connessione
+ * Vecs Project: Implementazione Gestione Connessione
  * (src/core/connection.c)
  */
 
@@ -18,10 +18,10 @@
 #define CONN_INITIAL_BUFFER_SIZE 1024
 
 // Struct interna
-struct vex_connection_s {
+struct vecs_connection_s {
     int fd;
-    vex_server_t *server;
-    vex_connection_state_t state;
+    vecs_server_t *server;
+    vecs_connection_state_t state;
     
     buffer_t *read_buf;  
     buffer_t *write_buf; 
@@ -29,10 +29,10 @@ struct vex_connection_s {
     vsp_parser_t *parser;
 };
 
-vex_connection_t* connection_create(vex_server_t *server, int fd) {
-    vex_connection_t *conn = malloc(sizeof(vex_connection_t));
+vecs_connection_t* connection_create(vecs_server_t *server, int fd) {
+    vecs_connection_t *conn = malloc(sizeof(vecs_connection_t));
     if (conn == NULL) {
-        log_error("malloc fallito per vex_connection_t: %s", strerror(errno));
+        log_error("malloc fallito per vecs_connection_t: %s", strerror(errno));
         return NULL;
     }
 
@@ -56,7 +56,7 @@ vex_connection_t* connection_create(vex_server_t *server, int fd) {
     return conn;
 }
 
-void connection_destroy(vex_connection_t *conn) {
+void connection_destroy(vecs_connection_t *conn) {
     if (conn == NULL) return;
 
     // Prevenzione doppia chiusura
@@ -79,26 +79,26 @@ void connection_destroy(vex_connection_t *conn) {
 
 // --- Getters e Setters ---
 
-int connection_get_fd(vex_connection_t *conn) {
+int connection_get_fd(vecs_connection_t *conn) {
     return conn->fd;
 }
-vex_server_t* connection_get_server(vex_connection_t *conn) {
+vecs_server_t* connection_get_server(vecs_connection_t *conn) {
     return conn->server;
 }
-buffer_t* connection_get_read_buffer(vex_connection_t *conn) {
+buffer_t* connection_get_read_buffer(vecs_connection_t *conn) {
     return conn->read_buf;
 }
-buffer_t* connection_get_write_buffer(vex_connection_t *conn) {
+buffer_t* connection_get_write_buffer(vecs_connection_t *conn) {
     return conn->write_buf;
 }
 
-vsp_parser_t* connection_get_parser(vex_connection_t *conn) {
+vsp_parser_t* connection_get_parser(vecs_connection_t *conn) {
     return conn->parser;
 }
 
-vex_connection_state_t connection_get_state(vex_connection_t *conn) {
+vecs_connection_state_t connection_get_state(vecs_connection_t *conn) {
     return conn->state;
 }
-void connection_set_state(vex_connection_t *conn, vex_connection_state_t state) {
+void connection_set_state(vecs_connection_t *conn, vecs_connection_state_t state) {
     conn->state = state;
 }

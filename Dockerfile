@@ -42,18 +42,18 @@ RUN apt-get update && apt-get install -y \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/vex .
+COPY --from=builder /app/vecs .
 COPY --from=builder /app/models/default_model.gguf ./models/default_model.gguf
 
 RUN mkdir -p /app/custom_models
 
 # ENV Defaults
-ENV VEX_MODEL_PATH="/app/models/default_model.gguf"
-ENV VEX_L2_THRESHOLD="0.65"
-ENV VEX_L2_DEDUPE_THRESHOLD="0.95"
-ENV VEX_L2_CAPACITY="5000"
+ENV VECS_MODEL_PATH="/app/models/default_model.gguf"
+ENV VECS_L2_THRESHOLD="0.65"
+ENV VECS_L2_DEDUPE_THRESHOLD="0.95"
+ENV VECS_L2_CAPACITY="5000"
 
 EXPOSE 6379
 VOLUME ["/app/custom_models"]
 
-CMD ["./vex"]
+CMD ["./vecs"]

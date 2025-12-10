@@ -1,5 +1,5 @@
-#ifndef VEX_TEXT_H
-#define VEX_TEXT_H
+#ifndef VECS_TEXT_H
+#define VECS_TEXT_H
 
 #include <stddef.h> // Necessario per size_t
 
@@ -12,4 +12,4 @@
  */
 void normalize_text(const char *input, char *output, size_t out_size);
 
-#endif // VEX_TEXT_H
+#endif // VECS_TEXT_H

@@ -1,5 +1,5 @@
-#ifndef VEX_VECTOR_ENGINE_H
-#define VEX_VECTOR_ENGINE_H
+#ifndef VECS_VECTOR_ENGINE_H
+#define VECS_VECTOR_ENGINE_H
 
 #include <stddef.h>
 

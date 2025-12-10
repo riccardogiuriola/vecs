@@ -1,5 +1,5 @@
 /*
- * Vex Project: Vector Engine (Wrapper Llama.cpp)
+ * Vecs Project: Vector Engine (Wrapper Llama.cpp)
  * (src/vector/vector_engine.c)
  */
 

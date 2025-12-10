@@ -1,10 +1,10 @@
 /*
- * Vex Project: Header VSP Parser
+ * Vecs Project: Header VSP Parser
  * (include/vsp_parser.h)
  * * API Aggiornata (Fase 3)
  */
-#ifndef VEX_VSP_PARSER_H
-#define VEX_VSP_PARSER_H
+#ifndef VECS_VSP_PARSER_H
+#define VECS_VSP_PARSER_H
 
 // Forward declarations
 typedef struct vsp_parser_s vsp_parser_t;
@@ -13,26 +13,27 @@ typedef struct buffer_s buffer_t;
 /**
  * @brief Risultati dell'esecuzione del parser
  */
-typedef enum {
-    VSP_OK,     // Un comando completo è stato analizzato ed è pronto in argc/argv
-    VSP_AGAIN,  // Il buffer non contiene ancora un comando completo
-    VSP_ERROR   // Errore di protocollo
+typedef enum
+{
+    VSP_OK,    // Un comando completo è stato analizzato ed è pronto in argc/argv
+    VSP_AGAIN, // Il buffer non contiene ancora un comando completo
+    VSP_ERROR  // Errore di protocollo
 } vsp_parse_result_t;
 
 /**
  * @brief Stato interno del parser (per i log)
  */
-typedef enum {
-    VSP_STATE_INIT,         // In attesa di '*' (inizio array)
-    VSP_STATE_READ_ARGC,    // In attesa del numero di argomenti
-    VSP_STATE_READ_LEN,     // In attesa di '$' (inizio lunghezza)
-    VSP_STATE_READ_BULKLEN, // In attesa della lunghezza
-    VSP_STATE_READ_BULKDATA,// In attesa dei dati
-    VSP_STATE_READ_CR,      // In attesa di \r dopo i dati
-    VSP_STATE_READ_LF,      // In attesa di \n dopo i dati
+typedef enum
+{
+    VSP_STATE_INIT,          // In attesa di '*' (inizio array)
+    VSP_STATE_READ_ARGC,     // In attesa del numero di argomenti
+    VSP_STATE_READ_LEN,      // In attesa di '$' (inizio lunghezza)
+    VSP_STATE_READ_BULKLEN,  // In attesa della lunghezza
+    VSP_STATE_READ_BULKDATA, // In attesa dei dati
+    VSP_STATE_READ_CR,       // In attesa di \r dopo i dati
+    VSP_STATE_READ_LF,       // In attesa di \n dopo i dati
     VSP_STATE_ERROR
 } vsp_parser_state_t;
-
 
 /**
  * @brief Crea una nuova istanza del parser.
@@ -69,4 +70,4 @@ void vsp_parser_free_argv(int argc, char **argv);
  */
 vsp_parser_state_t vsp_parser_get_state(vsp_parser_t *parser);
 
-#endif // VEX_VSP_PARSER_H
+#endif // VECS_VSP_PARSER_H

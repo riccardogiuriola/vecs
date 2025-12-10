@@ -1,12 +1,12 @@
 /*
- * Vex Project: Header Buffer Dinamico
+ * Vecs Project: Header Buffer Dinamico
  * (include/buffer.h)
  */
 
-#ifndef VEX_BUFFER_H
-#define VEX_BUFFER_H
+#ifndef VECS_BUFFER_H
+#define VECS_BUFFER_H
 
-#include <stddef.h> // per size_t
+#include <stddef.h>    // per size_t
 #include <sys/types.h> // per ssize_t
 
 // Handle opaco per il buffer
@@ -17,7 +17,7 @@ typedef struct buffer_s buffer_t;
  * @param initial_capacity Capacità iniziale in byte.
  * @return Un puntatore al nuovo buffer, o NULL in caso di fallimento.
  */
-buffer_t* buffer_create(size_t initial_capacity);
+buffer_t *buffer_create(size_t initial_capacity);
 
 /**
  * @brief Distrugge un buffer e libera la sua memoria.
@@ -42,7 +42,6 @@ int buffer_append_data(buffer_t *buf, const void *data, size_t len);
  */
 int buffer_append_string(buffer_t *buf, const char *str);
 
-
 /**
  * @brief Rimuove dati dall'inizio del buffer (consuma).
  * Sposta la memoria rimanente all'inizio.
@@ -56,7 +55,7 @@ void buffer_consume(buffer_t *buf, size_t len);
  * @param buf Il buffer.
  * @return Puntatore all'inizio dei dati.
  */
-const void* buffer_peek(const buffer_t *buf);
+const void *buffer_peek(const buffer_t *buf);
 
 /**
  * @brief Restituisce la quantità di dati attualmente nel buffer.
@@ -70,8 +69,7 @@ size_t buffer_len(const buffer_t *buf);
  * @param buf Il buffer.
  * @return Un puntatore all'inizio di \r\n, o NULL se non trovato.
  */
-char* buffer_find_crlf(buffer_t *buf);
-
+char *buffer_find_crlf(buffer_t *buf);
 
 /**
  * @brief Legge dati da un file descriptor e li aggiunge al buffer.
@@ -91,5 +89,4 @@ ssize_t buffer_read_from_fd(buffer_t *buf, int fd);
  */
 ssize_t buffer_write_to_fd(buffer_t *buf, int fd);
 
-
-#endif // VEX_BUFFER_H
+#endif // VECS_BUFFER_H

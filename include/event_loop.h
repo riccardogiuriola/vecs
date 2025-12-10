@@ -1,33 +1,33 @@
 /*
- * Vex Project: Header Astrazione Event Loop
+ * Vecs Project: Header Astrazione Event Loop
  * (include/event_loop.h)
  */
 
-#ifndef VEX_EVENT_LOOP_H
-#define VEX_EVENT_LOOP_H
+#ifndef VECS_EVENT_LOOP_H
+#define VECS_EVENT_LOOP_H
 
 // Handle opaco per il loop eventi
 typedef struct event_loop_s event_loop_t;
 
 // Struct evento unificata (ciò che el_poll restituisce)
-typedef struct vex_event_s {
-    void *udata; // Puntatore utente (es. vex_server_t* o vex_connection_t*)
-    int  fd;     // File descriptor associato
-    
+typedef struct vecs_event_s
+{
+    void *udata; // Puntatore utente (es. vecs_server_t* o vecs_connection_t*)
+    int fd;      // File descriptor associato
+
     // Flags per descrivere l'evento
     unsigned int read : 1;
     unsigned int write : 1;
     unsigned int eof : 1;
     unsigned int error : 1;
-} vex_event_t;
-
+} vecs_event_t;
 
 /**
  * @brief Crea una nuova istanza del loop eventi (kqueue o epoll).
  * @param max_events Numero massimo di eventi/connessioni da gestire.
  * @return Un puntatore al loop, o NULL in caso di fallimento.
  */
-event_loop_t* el_create(int max_events);
+event_loop_t *el_create(int max_events);
 
 /**
  * @brief Distrugge il loop eventi e libera le risorse.
@@ -44,13 +44,13 @@ void el_destroy(event_loop_t *loop);
  * @param timeout_ms Timeout in millisecondi (-1 per attendere indefinitamente).
  * @return Il numero di eventi attivi in active_events, o -1 in caso di errore.
  */
-int el_poll(event_loop_t *loop, vex_event_t *active_events, int timeout_ms);
+int el_poll(event_loop_t *loop, vecs_event_t *active_events, int timeout_ms);
 
 /**
  * @brief Aggiunge un file descriptor al loop per monitorare la LETTURA.
  * @param loop Il loop eventi.
  * @param fd Il file descriptor da aggiungere.
- * @param udata Il puntatore utente da associare (sarà restituito in vex_event_t).
+ * @param udata Il puntatore utente da associare (sarà restituito in vecs_event_t).
  * @return 0 in caso di successo, -1 in caso di errore.
  */
 int el_add_fd_read(event_loop_t *loop, int fd, void *udata);
@@ -81,5 +81,4 @@ int el_enable_write(event_loop_t *loop, int fd, void *udata);
  */
 int el_disable_write(event_loop_t *loop, int fd, void *udata);
 
-
-#endif // VEX_EVENT_LOOP_H
+#endif // VECS_EVENT_LOOP_H

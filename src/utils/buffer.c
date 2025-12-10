@@ -1,5 +1,5 @@
 /*
- * Vex Project: Implementazione Buffer Dinamico
+ * Vecs Project: Implementazione Buffer Dinamico
  * (src/utils/buffer.c)
  *
  * --- AGGIORNATO (Fase 3/Fix) ---

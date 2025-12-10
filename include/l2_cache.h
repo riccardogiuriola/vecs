@@ -1,5 +1,5 @@
-#ifndef VEX_L2_CACHE_H
-#define VEX_L2_CACHE_H
+#ifndef VECS_L2_CACHE_H
+#define VECS_L2_CACHE_H
 
 #include <stddef.h>
 
@@ -18,6 +18,6 @@ int l2_cache_insert(l2_cache_t *cache, const float *vector, const char *prompt_t
 const char *l2_cache_search(l2_cache_t *cache, const float *query_vector, const char *query_text, float threshold);
 
 // Rimuove un elemento semanticamente equivalente
-int l2_cache_delete_semantic(l2_cache_t* cache, const float* query_vector);
+int l2_cache_delete_semantic(l2_cache_t *cache, const float *query_vector);
 
-#endif // VEX_L2_CACHE_H
+#endif // VECS_L2_CACHE_H

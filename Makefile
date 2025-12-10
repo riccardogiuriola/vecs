@@ -1,5 +1,5 @@
 #
-# Vex Project: Makefile (Docker & Linker Fix + OpenMP)
+# Vecs Project: Makefile (Docker & Linker Fix + OpenMP)
 #
 
 CC = gcc
@@ -7,7 +7,7 @@ CFLAGS = -Wall -Wextra -std=c11 -g -O2
 INCLUDE_DIR = include
 SRC_DIR = src
 OBJ_DIR = obj
-TARGET = vex
+TARGET = vecs
 
 # --- Configurazione Llama.cpp ---
 LLAMA_ROOT = vendor/llama.cpp

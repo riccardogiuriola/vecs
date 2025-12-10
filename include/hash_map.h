@@ -1,9 +1,9 @@
 /*
- * Vex Project: Header Hash Map (Cache L1)
+ * Vecs Project: Header Hash Map (Cache L1)
  * (include/hash_map.h)
  */
-#ifndef VEX_HASH_MAP_H
-#define VEX_HASH_MAP_H
+#ifndef VECS_HASH_MAP_H
+#define VECS_HASH_MAP_H
 
 #include <stddef.h> // Per size_t
 
@@ -60,4 +60,4 @@ const char *hash_map_get(hash_map_t *map, const char *key);
  */
 void hash_map_delete(hash_map_t *map, const char *key);
 
-#endif // VEX_HASH_MAP_H
+#endif // VECS_HASH_MAP_H

@@ -1,5 +1,5 @@
 /*
- * Vex Project: Implementazione Kqueue (macOS)
+ * Vecs Project: Implementazione Kqueue (macOS)
  * (src/net/event_kqueue.c)
  */
 
@@ -78,7 +78,7 @@ void el_destroy(event_loop_t *loop) {
     free(loop);
 }
 
-int el_poll(event_loop_t *loop, vex_event_t *active_events, int timeout_ms) {
+int el_poll(event_loop_t *loop, vecs_event_t *active_events, int timeout_ms) {
     struct timespec timeout;
     struct timespec *timeout_ptr = NULL;
     
@@ -100,7 +100,7 @@ int el_poll(event_loop_t *loop, vex_event_t *active_events, int timeout_ms) {
     // Traduce gli eventi kqueue nel nostro formato astratto
     for (int i = 0; i < num_events; i++) {
         struct kevent *e = &loop->events[i];
-        vex_event_t *ve = &active_events[i];
+        vecs_event_t *ve = &active_events[i];
         
         ve->fd = (int)e->ident;
         ve->udata = e->udata;

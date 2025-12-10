@@ -103,7 +103,7 @@ make
 ### 4\. Run
 
 ```
-./vex
+./vecs
 
 ```
 
@@ -133,9 +133,9 @@ You can tune thresholds and capacity using Environment Variables.
 docker run -d\
   --name vecs\
   -p 6379:6379\
-  -e VEX_L2_THRESHOLD="0.75"\
-  -e VEX_L2_DEDUPE_THRESHOLD="0.95"\
-  -e VEX_L2_CAPACITY="10000"\
+  -e VECS_L2_THRESHOLD="0.75"\
+  -e VECS_L2_DEDUPE_THRESHOLD="0.95"\
+  -e VECS_L2_CAPACITY="10000"\
   vecs:latest
 
 ```
@@ -152,8 +152,8 @@ services:
     ports:
       - "6379:6379"
     environment:
-      - VEX_L2_THRESHOLD=0.65
-      - VEX_L2_CAPACITY=5000
+      - VECS_L2_THRESHOLD=0.65
+      - VECS_L2_CAPACITY=5000
     # Uncomment to use custom models
     # volumes:
     #   - ./my_models:/app/custom_models
@@ -162,16 +162,16 @@ services:
 
 ## ⚙️ Configuration (Environment Variables)
 
-| Variable                  | Default            | Description                                                                              |
-| :------------------------ | :----------------- | :--------------------------------------------------------------------------------------- |
-| `VEX_MODEL_PATH`          | `models/bge-m3...` | Path to the `.gguf` embedding model.                                                     |
-| `VEX_L2_THRESHOLD`        | `0.65`             | Minimum cosine similarity (0.0 - 1.0) to consider a request a HIT. Lower = more lenient. |
-| `VEX_L2_DEDUPE_THRESHOLD` | `0.95`             | If a new entry is > 95% similar to an existing one, it is NOT saved (Deduplication).     |
-| `VEX_L2_CAPACITY`         | `5000`             | Maximum number of vectors to keep in RAM.                                                |
+| Variable                   | Default            | Description                                                                              |
+| :------------------------- | :----------------- | :--------------------------------------------------------------------------------------- |
+| `VECS_MODEL_PATH`          | `models/bge-m3...` | Path to the `.gguf` embedding model.                                                     |
+| `VECS_L2_THRESHOLD`        | `0.65`             | Minimum cosine similarity (0.0 - 1.0) to consider a request a HIT. Lower = more lenient. |
+| `VECS_L2_DEDUPE_THRESHOLD` | `0.95`             | If a new entry is > 95% similar to an existing one, it is NOT saved (Deduplication).     |
+| `VECS_L2_CAPACITY`         | `5000`             | Maximum number of vectors to keep in RAM.                                                |
 
 ## 📡 API Protocol (VSP)
 
-Vecs uses **VSP (Vex Simple Protocol)**, a text-based protocol similar to RESP. You can interact with it using `nc` or the provided clients.
+Vecs uses **VSP (Vecs Simple Protocol)**, a text-based protocol similar to RESP. You can interact with it using `nc` or the provided clients.
 
 ### SET (Store Data)
 
