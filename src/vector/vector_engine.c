@@ -13,7 +13,9 @@
 
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
+#ifndef EMBEDDING_PREFIX
 #define EMBEDDING_PREFIX "Represent this sentence for searching relevant passages: "
+#endif
 
 struct vector_engine_s {
     struct llama_model *model;
@@ -71,90 +73,104 @@ int vector_engine_get_dim(vector_engine_t *engine) {
 int vector_engine_embed(vector_engine_t *engine, const char *text, float *out_vector) {
     if (!engine || !text || !out_vector) return -1;
 
-    // --- PUNTO 2: Gestione Prefisso ---
-    // Concateniamo PREFISSO + TESTO
+    // --- 1. Preparazione Testo ---
     char *input_text = NULL;
-    size_t prefix_len = strlen(EMBEDDING_PREFIX);
+    size_t prefix_len = strlen(EMBEDDING_PREFIX); 
     size_t text_len = strlen(text);
     
-    // Se il prefisso c'è, allochiamo nuova memoria
     if (prefix_len > 0) {
         input_text = malloc(prefix_len + text_len + 1);
         if (!input_text) return -1;
-        strcpy(input_text, EMBEDDING_PREFIX);
-        strcat(input_text, text);
+        memcpy(input_text, EMBEDDING_PREFIX, prefix_len);
+        memcpy(input_text + prefix_len, text, text_len);
+        input_text[prefix_len + text_len] = '\0'; 
     } else {
-        // Altrimenti usiamo il puntatore diretto (cast per togliere const temporaneamente se serve, ma meglio strdup se tokenizzatore modifica)
         input_text = strdup(text); 
     }
 
+    if (!input_text) return -1;
+
+    // --- 2. Tokenizzazione ---
     const struct llama_vocab *vocab = llama_model_get_vocab(engine->model);
 
-    // Tokenizzazione
-    int n_tokens_alloc = strlen(input_text) + 16; 
+    int n_tokens_alloc = prefix_len + text_len + 16; 
     llama_token *tokens = malloc(n_tokens_alloc * sizeof(llama_token));
+    
     int n_tokens = llama_tokenize(vocab, input_text, strlen(input_text), tokens, n_tokens_alloc, true, false);
 
-    // Gestione realloc token se buffer piccolo (come nel tuo codice originale) ...
     if (n_tokens < 0) {
         n_tokens_alloc = -n_tokens;
-        tokens = realloc(tokens, n_tokens_alloc * sizeof(llama_token));
+        llama_token *new_tokens = realloc(tokens, n_tokens_alloc * sizeof(llama_token));
+        if (!new_tokens) {
+            free(tokens);
+            free(input_text);
+            return -1;
+        }
+        tokens = new_tokens;
         n_tokens = llama_tokenize(vocab, input_text, strlen(input_text), tokens, n_tokens_alloc, true, false);
     }
     
     free(input_text);
 
     if (n_tokens <= 0) {
+        log_error("Errore tokenizzazione o stringa vuota");
         free(tokens);
         return -1;
     }
 
-    // Inferenza
+    // --- 3. Inferenza ---
     struct llama_batch batch = llama_batch_get_one(tokens, n_tokens);
-    if (llama_decode(engine->ctx, batch) != 0) { // O llama_encode se modello solo encoder
-        log_error("llama_decode fallito");
+    
+    int ret = -1;
+
+    // Controlliamo se il modello è Encoder-Only (es. BGE, BERT)
+    if (llama_model_has_encoder(engine->model) && !llama_model_has_decoder(engine->model)) {
+        ret = llama_encode(engine->ctx, batch);
+    } else {
+        ret = llama_decode(engine->ctx, batch);
+    }
+
+    if (ret != 0) {
+        log_error("Inference fallita (ret: %d)", ret);
         free(tokens);
         return -1;
     }
 
-    // --- PUNTO 1: Mean Pooling ---
-    
-    // Otteniamo il puntatore a TUTTI gli embedding generati (uno per token)
-    // llama.cpp restituisce un array contiguo: [tok0_dim0...tok0_dimN, tok1_dim0...tok1_dimN, ...]
-    float *all_embeddings = llama_get_embeddings(engine->ctx);
-    
+    // --- 4. Mean Pooling ---
+    float *all_embeddings = llama_get_embeddings_seq(engine->ctx, 0);
     if (!all_embeddings) {
+        all_embeddings = llama_get_embeddings(engine->ctx);
+    }
+
+    if (!all_embeddings) {
+        log_error("Impossibile ottenere embeddings da llama.cpp");
         free(tokens);
         return -1;
     }
 
-    // 1. Azzera output
+    // Azzera output
     memset(out_vector, 0, engine->n_embd * sizeof(float));
 
-    // 2. Somma vettoriale (Mean Pooling)
+    // Somma vettoriale (Mean Pooling)
     for (int i = 0; i < n_tokens; i++) {
-        // Puntatore all'embedding del token i-esimo
         float *token_emb = all_embeddings + (i * engine->n_embd);
-        
         for (int j = 0; j < engine->n_embd; j++) {
             out_vector[j] += token_emb[j];
         }
     }
 
-    // 3. Divisione per numero token
+    // Divisione per media
     for (int j = 0; j < engine->n_embd; j++) {
         out_vector[j] /= (float)n_tokens;
     }
 
-    // 4. Normalizzazione L2 (Euclidea) finale
-    // Essenziale per poter usare il Dot Product come Cosine Similarity
+    // Normalizzazione Euclidea
     float norm = 0.0f;
     for (int i = 0; i < engine->n_embd; i++) {
         norm += out_vector[i] * out_vector[i];
     }
     norm = sqrtf(norm);
     
-    // Evita divisione per zero
     if (norm > 1e-9) { 
         for (int i = 0; i < engine->n_embd; i++) {
             out_vector[i] /= norm;
