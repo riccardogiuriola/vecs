@@ -20,9 +20,9 @@ COPY . .
 RUN rm -rf vendor/llama.cpp/build
 
 # 2. Download Modello (BGE-M3)
-RUN mkdir -p models && \
-    curl -L -o models/default_model.gguf \
-    https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q4_K_M.gguf
+#RUN mkdir -p models && \
+#    curl -L -o models/default_model.gguf \
+#    https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q4_K_M.gguf
 
 # 3. Build Llama.cpp (Usa il nuovo Makefile con CURL=OFF)
 RUN make libs
@@ -43,9 +43,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/vecs .
-COPY --from=builder /app/models/default_model.gguf ./models/default_model.gguf
+#COPY --from=builder /app/models/default_model.gguf ./models/default_model.gguf
 
-RUN mkdir -p /app/custom_models
+RUN mkdir -p /app/models
 
 # ENV Defaults
 ENV VECS_MODEL_PATH="/app/models/default_model.gguf"
@@ -54,6 +54,6 @@ ENV VECS_L2_DEDUPE_THRESHOLD="0.95"
 ENV VECS_L2_CAPACITY="5000"
 
 EXPOSE 6379
-VOLUME ["/app/custom_models"]
+VOLUME ["/app/models"]
 
 CMD ["./vecs"]

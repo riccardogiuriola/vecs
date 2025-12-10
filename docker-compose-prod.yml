@@ -7,8 +7,8 @@ services:
     env_file:
       - .env
     # Scommenta le righe sotto se vuoi usare modelli custom
-    # volumes:
-    #   - ./my_local_models:/app/custom_models
+    volumes:
+      - ./models:/app/models
     restart: unless-stopped
     ulimits:
       memlock: -1 # Utile per llama.cpp (mmap)
