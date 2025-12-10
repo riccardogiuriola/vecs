@@ -1,0 +1,15 @@
+services:
+  vecs:
+    image: ghcr.io/riccardogiuriola/vecs:v1.0.1
+    container_name: vecs
+    ports:
+      - "6379:6379"
+    env_file:
+      - .env
+    # Scommenta le righe sotto se vuoi usare modelli custom
+    # volumes:
+    #   - ./my_local_models:/app/custom_models
+    restart: unless-stopped
+    ulimits:
+      memlock: -1 # Utile per llama.cpp (mmap)
+      stack: 67108864
