@@ -14,6 +14,7 @@
 #include "hash_map.h"
 #include "vector_engine.h"
 #include "l2_cache.h"
+#include "text.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -240,13 +241,16 @@ static void server_execute_command(vex_connection_t *conn, int argc, char **argv
 
             // 2. Inserimento L2 (Semantic - Con Deduplica Dinamica)
             // Calcoliamo l'embedding del prompt
-            if (vector_engine_embed(server->vec_engine, argv[1], server->tmp_vector_buf) == 0) {
+            char clean_prompt[4096];
+            normalize_text(argv[1], clean_prompt, sizeof(clean_prompt));
+            if (vector_engine_embed(server->vec_engine, clean_prompt, server->tmp_vector_buf) == 0) {
                 
                 // STEP DEDUPLICAZIONE:
                 // Usiamo la soglia configurata (es. 0.95) per vedere se esiste già
                 const char *existing = l2_cache_search(
                     server->l2_cache, 
                     server->tmp_vector_buf, 
+                    argv[1],
                     server->config.l2_dedupe_threshold
                 );
 
@@ -255,7 +259,7 @@ static void server_execute_command(vex_connection_t *conn, int argc, char **argv
                     log_info("SET L2 Skipped: Concetto semantico già presente (Score > %.2f)", server->config.l2_dedupe_threshold);
                 } else {
                     // NUOVO CONCETTO -> INSERISCI
-                    l2_cache_insert(server->l2_cache, server->tmp_vector_buf, argv[3]);
+                    l2_cache_insert(server->l2_cache, server->tmp_vector_buf, argv[1], argv[3]);
                     log_info("SET L2 OK (Nuovo concetto inserito).");
                 }
 
@@ -289,11 +293,14 @@ static void server_execute_command(vex_connection_t *conn, int argc, char **argv
                 log_debug("MISS L1. Provo Semantic Search L2...");
 
                 // Embedding della query (PURO, senza prefissi per BGE-M3/MiniLM)
-                if (vector_engine_embed(server->vec_engine, argv[1], server->tmp_vector_buf) == 0) {
+                char clean_prompt[4096];
+                normalize_text(argv[1], clean_prompt, sizeof(clean_prompt));
+                if (vector_engine_embed(server->vec_engine, clean_prompt, server->tmp_vector_buf) == 0) {
                     
                     const char *semantic_val = l2_cache_search(
                         server->l2_cache, 
-                        server->tmp_vector_buf, 
+                        server->tmp_vector_buf,
+                        argv[1],
                         server->config.l2_threshold
                     );
 
@@ -333,7 +340,9 @@ static void server_execute_command(vex_connection_t *conn, int argc, char **argv
             
             // 2. Cancella da L2 (Semantic Match)
             // Calcoliamo l'embedding del prompt da cancellare
-            if (vector_engine_embed(server->vec_engine, argv[1], server->tmp_vector_buf) == 0) {
+            char clean_prompt[4096];
+            normalize_text(argv[1], clean_prompt, sizeof(clean_prompt));
+            if (vector_engine_embed(server->vec_engine, clean_prompt, server->tmp_vector_buf) == 0) {
                 if (l2_cache_delete_semantic(server->l2_cache, server->tmp_vector_buf)) {
                     deleted_count++;
                 }

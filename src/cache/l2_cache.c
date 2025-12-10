@@ -3,9 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <ctype.h>
 
 typedef struct {
     float* vector;
+    char* original_prompt;
     char* response;
 } l2_entry_t;
 
@@ -30,56 +32,102 @@ void l2_cache_destroy(l2_cache_t* cache) {
     for (size_t i = 0; i < cache->size; i++) {
         free(cache->entries[i].vector);
         free(cache->entries[i].response);
+        free(cache->entries[i].original_prompt);
     }
     free(cache->entries);
     free(cache);
 }
 
-int l2_cache_insert(l2_cache_t* cache, const float* vector, const char* response) {
+int l2_cache_insert(l2_cache_t* cache, const float* vector, const char* prompt_text, const char* response) {
     if (cache->size >= cache->capacity) {
-        // MVP: Se piena, sovrascriviamo a caso o rifiutiamo. 
-        // TODO: Implementare LRU eviction
-        log_warn("L2 Cache piena! Impossibile inserire.");
+        log_warn("L2 Cache piena!");
         return -1;
     }
 
     l2_entry_t* entry = &cache->entries[cache->size];
     
-    // Copia il vettore
     entry->vector = malloc(cache->vector_dim * sizeof(float));
     memcpy(entry->vector, vector, cache->vector_dim * sizeof(float));
 
-    // Copia la risposta
+    entry->original_prompt = strdup(prompt_text);
     entry->response = strdup(response);
 
     cache->size++;
     return 0;
 }
 
-const char* l2_cache_search(l2_cache_t* cache, const float* query_vector, float threshold) {
+static int has_negation(const char* text) {
+    // Controllo molto semplice (case insensitive substring)
+    // Per produzione servirebbe tokenizzazione accurata
+    char buffer[1024];
+    strncpy(buffer, text, 1023);
+    for(int i=0; buffer[i]; i++) buffer[i] = tolower(buffer[i]);
+
+    if (strstr(buffer, " non ") || strstr(buffer, " no ") || strstr(buffer, " not ") || 
+        strstr(buffer, " never ") || strstr(buffer, " mai ")) {
+        return 1;
+    }
+    return 0;
+}
+
+const char* l2_cache_search(l2_cache_t* cache, const float* query_vector, const char* query_text, float threshold) {
     float max_score = -1.0f;
     int best_index = -1;
+    
+    // Pre-calcolo negazione query per velocità
+    int query_has_neg = has_negation(query_text);
+    size_t query_len = strlen(query_text);
 
-    // Linear Scan (OK per < 10k items su CPU moderne)
-    // Poiché i vettori sono normalizzati (da vector_engine), 
-    // Cosine Similarity == Dot Product.
     for (size_t i = 0; i < cache->size; i++) {
         float dot = 0.0f;
         float* v = cache->entries[i].vector;
         
-        // Loop ottimizzabile con SIMD (AVX) in futuro
+        // 1. Vector Score (Cosine Similarity)
         for (int j = 0; j < cache->vector_dim; j++) {
             dot += query_vector[j] * v[j];
         }
+        
+        float final_score = dot;
 
-        if (dot > max_score) {
-            max_score = dot;
+        // Se il punteggio vettoriale è decente, applichiamo i filtri ibridi
+        // per vedere se dobbiamo PENALIZZARLO.
+        if (final_score > 0.5f) { // Optimization: non sprecare CPU su match scarsi
+            
+            l2_entry_t* entry = &cache->entries[i];
+
+            // --- PUNTO 5: Length Filtering ---
+            // Se le lunghezze differiscono drasticamente (> 50%), probabilmente è sbagliato
+            size_t entry_len = strlen(entry->original_prompt);
+            long diff = (long)query_len - (long)entry_len;
+            if (diff < 0) diff = -diff; // abs
+            
+            float len_ratio = (float)diff / (float)(query_len > entry_len ? query_len : entry_len);
+            
+            if (len_ratio > 0.5f) {
+                // Penalità drastica: riduci lo score del 20%
+                final_score *= 0.8f;
+                // log_debug("Penalità lunghezza applicata: %.2f", len_ratio);
+            }
+
+            // --- PUNTO 4: Negation Mismatch ---
+            // Se uno ha "non" e l'altro no, è gravissimo.
+            int entry_has_neg = has_negation(entry->original_prompt);
+            if (query_has_neg != entry_has_neg) {
+                // Penalità severa: riduci lo score del 25%
+                // Questo trasforma un match 0.90 (alto) in 0.67 (spesso sotto soglia)
+                final_score *= 0.75f;
+                // log_debug("Penalità negazione applicata");
+            }
+        }
+
+        if (final_score > max_score) {
+            max_score = final_score;
             best_index = i;
         }
     }
 
     if (best_index != -1 && max_score >= threshold) {
-        log_info("HIT L2 (Score: %.4f) -> %.30s...", max_score, cache->entries[best_index].response);
+        log_info("HIT L2 (Final Score: %.4f) -> %.30s...", max_score, cache->entries[best_index].response);
         return cache->entries[best_index].response;
     }
 
