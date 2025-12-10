@@ -1,0 +1,10 @@
+.git
+.vscode
+.DS_Store
+obj/
+vex
+# Ignore local models (Docker will download its own)
+models/
+# CRITICAL: Ignore local build artifacts of llama.cpp
+vendor/llama.cpp/build/
+vendor/llama.cpp/out/

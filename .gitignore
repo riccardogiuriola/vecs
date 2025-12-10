@@ -20,3 +20,5 @@ models
 
 *.py
 *.txt
+
+*.env

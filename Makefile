@@ -1,13 +1,9 @@
 #
-# Vex Project: Makefile (Robust Linker Version)
+# Vex Project: Makefile (Docker & Linker Fix + OpenMP)
 #
 
-# --- Variabili Base ---
-CC = clang
+CC = gcc
 CFLAGS = -Wall -Wextra -std=c11 -g -O2
-# Rimuoviamo Werror per sopravvivere ai warning di llama.cpp
-# CFLAGS += -Werror 
-
 INCLUDE_DIR = include
 SRC_DIR = src
 OBJ_DIR = obj
@@ -22,10 +18,24 @@ CPPFLAGS = -I$(INCLUDE_DIR) \
            -I$(LLAMA_ROOT)/include \
            -I$(LLAMA_ROOT)/ggml/include
 
-# --- MAGIA DEL LINKER ---
-# 1. Trova TUTTI i file .a dentro la cartella build di llama.cpp
-#    Questo include libllama.a, libggml.a, libggml-cpu.a, libggml-metal.a, libcommon.a, etc.
-ALL_LLAMA_LIBS = $(shell find $(LLAMA_BUILD) -name "*.a")
+# --- LOGICA LINKER ---
+NODEPS := clean libs
+
+ifeq (0, $(words $(findstring $(MAKECMDGOALS), $(NODEPS))))
+    # Recursive search for .a files
+    RAW_LIBS = $(shell find $(LLAMA_BUILD) -name "*.a" 2>/dev/null)
+    
+    LIB_LLAMA = $(filter %libllama.a, $(RAW_LIBS))
+    LIB_GGML_ALL = $(filter-out %libllama.a, $(RAW_LIBS))
+    
+    ALL_LLAMA_LIBS = $(LIB_LLAMA) $(LIB_GGML_ALL)
+
+    ifneq ($(strip $(ALL_LLAMA_LIBS)),)
+        # OK
+    else
+        $(error Nessuna libreria trovata in $(LLAMA_BUILD). Esegui 'make libs' prima.)
+    endif
+endif
 
 # --- Gestione Sorgenti ---
 ALL_SRCS = $(shell find $(SRC_DIR) -name '*.c')
@@ -36,33 +46,23 @@ PLATFORM_SPECIFIC_SRCS = src/net/event_kqueue.c \
 
 COMMON_SRCS = $(filter-out $(PLATFORM_SPECIFIC_SRCS), $(ALL_SRCS))
 
-# --- Rilevamento OS ---
 OS := $(shell uname)
 
-# Librerie comuni (std c++ per llama) + Tutte le lib trovate
-LIBS_COMMON = $(ALL_LLAMA_LIBS) -lstdc++
+# Linker Flags Comuni
+LINKER_GROUPS = -Wl,--start-group $(ALL_LLAMA_LIBS) -Wl,--end-group -lstdc++
 
 ifeq ($(OS),Darwin)
     PLATFORM_SRC = src/net/event_kqueue.c
     CFLAGS += -D_DARWIN_C_SOURCE
-    # Frameworks Apple necessari
     LDFLAGS_PLATFORM = -framework Accelerate -framework Metal -framework Foundation -framework MetalKit
-    LIBS = $(LIBS_COMMON) $(LDFLAGS_PLATFORM)
-
-else ifeq ($(OS),Linux)
+    LIBS = $(ALL_LLAMA_LIBS) -lstdc++ $(LDFLAGS_PLATFORM)
+else
+    # Linux / Docker
     PLATFORM_SRC = src/net/event_poll.c
     CFLAGS += -D_GNU_SOURCE
-    LDFLAGS_PLATFORM = -lm -pthread
-    LIBS = $(LIBS_COMMON) $(LDFLAGS_PLATFORM)
-else
-    $(error Piattaforma $(OS) non supportata)
-endif
-
-ifneq ($(strip $(ALL_LLAMA_LIBS)),)
-    # Solo per debug: stampa quali librerie sta linkando
-    $(info Linking with external libs: $(ALL_LLAMA_LIBS))
-else
-    $(error Nessuna libreria statica trovata in $(LLAMA_BUILD). Esegui 'make libs' prima.)
+    LDFLAGS_PLATFORM = -lm -pthread -ldl -fopenmp
+    
+    LIBS = $(LINKER_GROUPS) $(LDFLAGS_PLATFORM)
 endif
 
 SRCS = $(COMMON_SRCS) $(PLATFORM_SRC)
@@ -82,9 +82,17 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@echo "CC   $<"
 	@$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
+# Target libs
 libs:
 	@echo "Compiling Llama.cpp..."
-	cd $(LLAMA_ROOT) && cmake -B build -DBUILD_SHARED_LIBS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF && cmake --build build --config Release
+	@mkdir -p $(LLAMA_BUILD)
+	cd $(LLAMA_ROOT) && cmake -B build \
+		-DBUILD_SHARED_LIBS=OFF \
+		-DLLAMA_BUILD_EXAMPLES=OFF \
+		-DLLAMA_BUILD_TESTS=OFF \
+		-DLLAMA_CURL=OFF \
+		-DGGML_NATIVE=OFF \
+		&& cmake --build build --config Release
 
 clean:
 	@echo "CLEAN"

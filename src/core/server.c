@@ -1,6 +1,7 @@
 /*
  * Vex Project: Implementazione Server (Reactor Kqueue + Semantic Cache)
  * (src/core/server.c)
+ * * Includes: Env Configuration, L1 Cache, L2 Cache (Vector Search)
  */
 
 #include "server.h"
@@ -11,8 +12,6 @@
 #include "vsp_parser.h"
 #include "event_loop.h"
 #include "hash_map.h"
-
-// --- INTEGRAZIONE MODULI AI ---
 #include "vector_engine.h"
 #include "l2_cache.h"
 
@@ -23,18 +22,31 @@
 #include <unistd.h>
 #include <sys/socket.h>
 
-// Configurazioni
+// Configurazioni Statiche
 #define MAX_FD 65536
 #define MAX_EVENTS 64
 #define VEX_BACKLOG 128
 #define MAX_L1_KEY_SIZE 8192
 
-// Soglia di similarità per L2 (0.0 - 1.0). 
-#define L2_SIMILARITY_THRESHOLD 0.65f
-#define L2_DEDUPE_THRESHOLD     0.98f
+// --- DEFAULTS (Fallback se ENV non settate) ---
+// Usiamo BGE-M3 come default robusto
+#define DEFAULT_MODEL_PATH "models/default_model.gguf"
+// Soglia conservativa per BGE (0.65 è ottimo per Q4_K_M)
+#define DEFAULT_L2_THRESHOLD "0.65"
+// Soglia alta per evitare duplicati quasi identici
+#define DEFAULT_L2_DEDUPE "0.95"
+// Capacità vettoriale di default
+#define DEFAULT_L2_CAPACITY "5000"
 
-// Percorso del modello
-#define MODEL_PATH "models/bge-m3-q4_k_m.gguf"
+/**
+ * @brief Configurazione Runtime (caricata da ENV)
+ */
+typedef struct {
+    char model_path[512];
+    float l2_threshold;
+    float l2_dedupe_threshold;
+    int l2_capacity;
+} vex_config_t;
 
 /**
  * @brief Struttura interna del Server
@@ -44,19 +56,40 @@ struct vex_server_s {
     int listen_fd;
     event_loop_t *loop;
     
+    // Configurazione Dinamica
+    vex_config_t config;
+
     // --- CACHE LAYERS ---
-    hash_map_t *l1_cache;        // L1: Exact Match (Hash Map)
+    hash_map_t *l1_cache;        // L1: Exact Match
+    vector_engine_t *vec_engine; // AI Engine
+    l2_cache_t *l2_cache;        // L2: Semantic Match
     
-    vector_engine_t *vec_engine; // Motore di inferenza AI
-    l2_cache_t *l2_cache;        // L2: Semantic Match (Vector Store)
-    
-    float *tmp_vector_buf;       // Buffer riutilizzabile per i calcoli di embedding
-    int vector_dim;              // Dimensione vettori
+    float *tmp_vector_buf;       // Buffer per embedding
+    int vector_dim;              // Dimensione vettori (letto dal modello)
 
     // Gestione connessioni
     vex_connection_t *connections[MAX_FD];
     vex_event_t *events;
 };
+
+// --- Helpers per ENV ---
+
+static const char* get_env_string(const char* key, const char* default_val) {
+    const char* val = getenv(key);
+    return val ? val : default_val;
+}
+
+static float get_env_float(const char* key, const char* default_val) {
+    const char* val = getenv(key);
+    if (!val) val = default_val;
+    return strtof(val, NULL);
+}
+
+static int get_env_int(const char* key, const char* default_val) {
+    const char* val = getenv(key);
+    if (!val) val = default_val;
+    return atoi(val);
+}
 
 // --- Prototipi Funzioni Statiche ---
 static void server_handle_client_event(vex_event_t *event);
@@ -64,9 +97,10 @@ static void server_handle_new_connection(vex_server_t *server);
 static void server_handle_client_read(vex_connection_t *conn);
 static void server_handle_client_write(vex_connection_t *conn);
 static void server_execute_command(vex_connection_t *conn, int argc, char **argv);
+void server_remove_connection(vex_connection_t *conn);
 
 
-// --- Gestori Eventi ---
+// --- Gestori Eventi (Network) ---
 
 static void server_handle_client_event(vex_event_t *event) {
     vex_connection_t *conn = (vex_connection_t*)event->udata;
@@ -180,7 +214,7 @@ static void server_handle_client_write(vex_connection_t *conn) {
     }
 }
 
-// --- CORE LOGIC: L1 & L2 CACHE ---
+// --- CORE LOGIC: L1 & L2 CACHE (Configurable) ---
 
 static void server_execute_command(vex_connection_t *conn, int argc, char **argv) {
     if (conn == NULL || argc == 0) return;
@@ -194,6 +228,7 @@ static void server_execute_command(vex_connection_t *conn, int argc, char **argv
     char header_buf[64];
 
     // --- COMANDO SET ---
+    // *4 $3 SET $prompt $params $response
     if (strcasecmp(argv[0], "SET") == 0) {
         if (argc != 4) {
             buffer_append_string(write_buf, "-ERR wrong number of arguments for 'SET'\r\n");
@@ -203,20 +238,21 @@ static void server_execute_command(vex_connection_t *conn, int argc, char **argv
             hash_map_set(l1_cache, key_buf, argv[3]);
             log_debug("SET L1 OK.");
 
-            // 2. Inserimento L2 (Semantic - Con Deduplica)
-            // Calcoliamo l'embedding
+            // 2. Inserimento L2 (Semantic - Con Deduplica Dinamica)
+            // Calcoliamo l'embedding del prompt
             if (vector_engine_embed(server->vec_engine, argv[1], server->tmp_vector_buf) == 0) {
                 
-                // STEP AGGIUNTIVO: Controlliamo se esiste già qualcosa di quasi identico
+                // STEP DEDUPLICAZIONE:
+                // Usiamo la soglia configurata (es. 0.95) per vedere se esiste già
                 const char *existing = l2_cache_search(
                     server->l2_cache, 
                     server->tmp_vector_buf, 
-                    L2_DEDUPE_THRESHOLD // Usa soglia 0.98/0.99
+                    server->config.l2_dedupe_threshold
                 );
 
                 if (existing != NULL) {
                     // DUPLICATO TROVATO!
-                    log_info("SET L2 Skipped: Concetto semantico già presente (Score > %.2f)", L2_DEDUPE_THRESHOLD);
+                    log_info("SET L2 Skipped: Concetto semantico già presente (Score > %.2f)", server->config.l2_dedupe_threshold);
                 } else {
                     // NUOVO CONCETTO -> INSERISCI
                     l2_cache_insert(server->l2_cache, server->tmp_vector_buf, argv[3]);
@@ -231,6 +267,7 @@ static void server_execute_command(vex_connection_t *conn, int argc, char **argv
         }
     
     // --- COMANDO QUERY ---
+    // *3 $5 QUERY $prompt $params
     } else if (strcasecmp(argv[0], "QUERY") == 0) {
         if (argc != 3) {
             buffer_append_string(write_buf, "-ERR wrong number of arguments for 'QUERY'\r\n");
@@ -249,19 +286,21 @@ static void server_execute_command(vex_connection_t *conn, int argc, char **argv
                 
             } else {
                 // MISS L1 -> L2
-                log_info("MISS L1. Provo Semantic Search L2...");
+                log_debug("MISS L1. Provo Semantic Search L2...");
 
-                // Embedding della query (PURO, senza prefissi)
+                // Embedding della query (PURO, senza prefissi per BGE-M3/MiniLM)
                 if (vector_engine_embed(server->vec_engine, argv[1], server->tmp_vector_buf) == 0) {
                     
                     const char *semantic_val = l2_cache_search(
                         server->l2_cache, 
                         server->tmp_vector_buf, 
-                        L2_SIMILARITY_THRESHOLD
+                        server->config.l2_threshold
                     );
 
                     if (semantic_val != NULL) {
                         // HIT L2
+                        log_info("HIT L2 (Semantic Match)!");
+                        
                         size_t val_len = strlen(semantic_val);
                         snprintf(header_buf, sizeof(header_buf), "$%zu\r\n", val_len);
                         buffer_append_string(write_buf, header_buf);
@@ -269,6 +308,7 @@ static void server_execute_command(vex_connection_t *conn, int argc, char **argv
                         buffer_append_string(write_buf, "\r\n");
                     } else {
                         // MISS TOTALE
+                        log_debug("MISS L2 (Nessuna similarità > %.2f)", server->config.l2_threshold);
                         buffer_append_string(write_buf, "$-1\r\n");
                     }
                 } else {
@@ -285,7 +325,7 @@ static void server_execute_command(vex_connection_t *conn, int argc, char **argv
 }
 
 
-// --- Implementazione Funzioni Pubbliche ---
+// --- Init & Lifecycle ---
 
 vex_server_t* server_create(const char *port) {
     vex_server_t *server = calloc(1, sizeof(vex_server_t));
@@ -298,12 +338,25 @@ vex_server_t* server_create(const char *port) {
     }
 
     server->port = port;
+
+    // --- CARICAMENTO CONFIGURAZIONE DA ENV ---
+    strncpy(server->config.model_path, get_env_string("VEX_MODEL_PATH", DEFAULT_MODEL_PATH), 511);
+    server->config.l2_threshold = get_env_float("VEX_L2_THRESHOLD", DEFAULT_L2_THRESHOLD);
+    server->config.l2_dedupe_threshold = get_env_float("VEX_L2_DEDUPE_THRESHOLD", DEFAULT_L2_DEDUPE);
+    server->config.l2_capacity = get_env_int("VEX_L2_CAPACITY", DEFAULT_L2_CAPACITY);
+
+    log_info("=== VEX CONFIG ===");
+    log_info("Model Path:   %s", server->config.model_path);
+    log_info("L2 Threshold: %.2f", server->config.l2_threshold);
+    log_info("L2 Dedupe:    %.2f", server->config.l2_dedupe_threshold);
+    log_info("L2 Capacity:  %d vectors", server->config.l2_capacity);
+    log_info("==================");
     
     // 1. Event Loop
     server->loop = el_create(MAX_FD);
     if (!server->loop) {
         log_fatal("Impossibile creare event loop.");
-        return NULL; // Leak parziale in caso di errore fatale qui, ma si esce
+        return NULL; 
     }
     
     // 2. L1 Cache
@@ -313,20 +366,20 @@ vex_server_t* server_create(const char *port) {
         return NULL;
     }
 
-    // 3. AI Vector Engine (Llama.cpp)
-    log_info("Caricamento modello AI da: %s ...", MODEL_PATH);
-    server->vec_engine = vector_engine_init(MODEL_PATH);
+    // 3. AI Vector Engine
+    log_info("Caricamento modello AI...");
+    server->vec_engine = vector_engine_init(server->config.model_path);
     if (!server->vec_engine) {
-        log_fatal("ERRORE CRITICO: Impossibile caricare il modello GGUF. Verifica che 'models/multilingual-minilm-l12-v2.q4_k_m.gguf' esista!");
-        // Pulizia base e uscita
+        log_fatal("ERRORE CRITICO: Impossibile caricare il modello GGUF da '%s'.", server->config.model_path);
+        // Clean up parziale...
         return NULL;
     }
 
-    // Ottieni dimensione embedding (es. 768)
+    // Ottieni dimensione embedding (dinamica, letta dal modello)
     server->vector_dim = vector_engine_get_dim(server->vec_engine);
     
     // 4. L2 Cache
-    server->l2_cache = l2_cache_create(server->vector_dim, 2000);
+    server->l2_cache = l2_cache_create(server->vector_dim, server->config.l2_capacity);
     
     // 5. Buffer temporaneo per embedding
     server->tmp_vector_buf = malloc(server->vector_dim * sizeof(float));
@@ -347,7 +400,7 @@ vex_server_t* server_create(const char *port) {
         return NULL;
     }
 
-    log_info("Vex Server (L1+L2 AI) avviato su porta %s. Dimensione Vettori: %d", port, server->vector_dim);
+    log_info("Vex Server avviato. Listening :%s. Vector Dim: %d", port, server->vector_dim);
     return server;
 }
 
