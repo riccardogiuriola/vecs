@@ -316,6 +316,35 @@ static void server_execute_command(vex_connection_t *conn, int argc, char **argv
                 }
             }
         }
+    } else if (strcasecmp(argv[0], "DELETE") == 0) {
+        if (argc != 3) {
+            buffer_append_string(write_buf, "-ERR wrong number of arguments for 'DELETE'\r\n");
+        } else {
+            int deleted_count = 0;
+
+            // 1. Cancella da L1 (Exact Match)
+            snprintf(key_buf, MAX_L1_KEY_SIZE, "%s|%s", argv[1], argv[2]);
+            
+            // Nota: hash_map_delete è void, ma assumiamo cancelli se esiste.
+            // Se volessimo contare, dovremmo modificare hash_map_delete per ritornare int.
+            // Per ora procediamo.
+            hash_map_delete(l1_cache, key_buf);
+            // Diciamo che L1 conta come 1 se c'era (non lo sappiamo con l'API attuale, ma fa nulla)
+            
+            // 2. Cancella da L2 (Semantic Match)
+            // Calcoliamo l'embedding del prompt da cancellare
+            if (vector_engine_embed(server->vec_engine, argv[1], server->tmp_vector_buf) == 0) {
+                if (l2_cache_delete_semantic(server->l2_cache, server->tmp_vector_buf)) {
+                    deleted_count++;
+                }
+            }
+
+            // Rispondiamo con un Intero (formato RESP ":<num>\r\n") 
+            // oppure OK per semplicità. Usiamo OK per coerenza col client attuale.
+            buffer_append_string(write_buf, "+OK\r\n");
+            
+            log_info("DELETE eseguito per '%s' (L2 rimossi: %d)", argv[1], deleted_count);
+        }
     } else {
         snprintf(header_buf, sizeof(header_buf), "-ERR unknown command '%s'\r\n", argv[0]);
         buffer_append_string(write_buf, header_buf);

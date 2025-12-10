@@ -86,3 +86,46 @@ const char* l2_cache_search(l2_cache_t* cache, const float* query_vector, float 
     log_debug("MISS L2 (Best Score: %.4f)", max_score);
     return NULL;
 }
+
+int l2_cache_delete_semantic(l2_cache_t* cache, const float* query_vector) {
+    // Soglia altissima per la cancellazione: vogliamo cancellare solo se è praticamente lo stesso concetto
+    float delete_threshold = 0.99f; 
+    
+    int best_index = -1;
+    float max_score = -1.0f;
+
+    // 1. Trova l'elemento
+    for (size_t i = 0; i < cache->size; i++) {
+        float dot = 0.0f;
+        float* v = cache->entries[i].vector;
+        for (int j = 0; j < cache->vector_dim; j++) {
+            dot += query_vector[j] * v[j];
+        }
+
+        if (dot > max_score) {
+            max_score = dot;
+            best_index = i;
+        }
+    }
+
+    // 2. Se trovato e supera la soglia, cancella
+    if (best_index != -1 && max_score >= delete_threshold) {
+        // Libera memoria
+        free(cache->entries[best_index].vector);
+        free(cache->entries[best_index].response);
+
+        // Ottimizzazione "Swap with Last":
+        // Invece di spostare tutto l'array (lento), prendiamo l'ultimo elemento
+        // e lo mettiamo nel buco lasciato da quello cancellato.
+        // L'ordine non conta nella ricerca vettoriale.
+        if (best_index < (int)cache->size - 1) {
+            cache->entries[best_index] = cache->entries[cache->size - 1];
+        }
+
+        cache->size--;
+        log_info("L2 DELETE: Rimosso elemento (Score: %.4f)", max_score);
+        return 1; // Cancellato
+    }
+
+    return 0; // Non trovato
+}

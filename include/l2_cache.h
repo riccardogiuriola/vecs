@@ -18,4 +18,8 @@ int l2_cache_insert(l2_cache_t *cache, const float *vector, const char *response
 // Restituisce la risposta se similarity > threshold, altrimenti NULL.
 const char *l2_cache_search(l2_cache_t *cache, const float *query_vector, float threshold);
 
+// Rimuove un elemento semanticamente equivalente al vettore dato.
+// Ritorna 1 se cancellato, 0 se non trovato.
+int l2_cache_delete_semantic(l2_cache_t* cache, const float* query_vector);
+
 #endif
