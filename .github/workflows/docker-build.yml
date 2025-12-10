@@ -2,7 +2,6 @@ name: Docker Build & Push (Release)
 
 on:
   push:
-    # Esegue la pipeline SOLO se viene pushato un tag che inizia con "v"
     tags: ["v*"]
 
 env:
@@ -11,28 +10,25 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    # CAMBIAMENTO 1: Usa il tuo Mac
+    runs-on: self-hosted
 
     permissions:
       contents: read
       packages: write
 
     steps:
-      # 1. Checkout (con sottomoduli per llama.cpp)
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: "recursive"
 
-      # 2. Setup QEMU (Necessario per compilare per ARM64/Mac M1/M2)
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      # NOTA: Ho rimosso "Setup QEMU". Docker Desktop su Mac gestisce l'emulazione
+      # amd64 (Rosetta) automaticamente senza bisogno di questa action.
 
-      # 3. Setup Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # 4. Login al Container Registry
       - name: Log into registry ${{ env.REGISTRY }}
         uses: docker/login-action@v3
         with:
@@ -40,28 +36,25 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 5. Generazione Tag Docker basata sul Tag Git
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # Genera automaticamente: 1.0.1, 1.0, latest
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
-      # 6. Build e Push (Multi-Architettura)
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
-          # Pusha sempre perché la pipeline parte solo sui tag
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Costruisce sia per Intel/Server che per Mac Silicon/Raspberry
+          # Manteniamo le due piattaforme.
+          # arm64 sarà nativo (veloce), amd64 sarà emulato (ma il M2 ce la fa).
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
