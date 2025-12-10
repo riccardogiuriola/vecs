@@ -10,8 +10,8 @@ env:
 
 jobs:
   build-and-push:
-    # CAMBIAMENTO 1: Usa il tuo Mac
-    runs-on: self-hosted
+    # Torniamo sui server di GitHub (connessione veloce)
+    runs-on: ubuntu-latest
 
     permissions:
       contents: read
@@ -23,8 +23,9 @@ jobs:
         with:
           submodules: "recursive"
 
-      # NOTA: Ho rimosso "Setup QEMU". Docker Desktop su Mac gestisce l'emulazione
-      # amd64 (Rosetta) automaticamente senza bisogno di questa action.
+      # REINSERITO: QEMU serve per compilare la versione ARM64 sui server Intel di GitHub
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -53,8 +54,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Manteniamo le due piattaforme.
-          # arm64 sarà nativo (veloce), amd64 sarà emulato (ma il M2 ce la fa).
+          # Multi-piattaforma: GitHub ci metterà un po' a compilare ARM via software,
+          # ma l'upload sarà istantaneo.
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
