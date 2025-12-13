@@ -30,6 +30,10 @@ RUN make libs
 # 4. Build Server
 RUN make -j$(nproc)
 
+# 4. Build CLI
+# Usa -C per dire a make di spostarsi nella directory
+RUN make -C vecs-cli -j$(nproc)
+
 # ==========================================
 # Stage 2: Runtime (Minimal)
 # ==========================================
@@ -42,8 +46,10 @@ RUN apt-get update && apt-get install -y \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Copia il server compilato
 COPY --from=builder /app/vecs .
-#COPY --from=builder /app/models/default_model.gguf ./models/default_model.gguf
+# Copia CLI compilata in un percorso globale
+COPY --from=builder /app/vecs-cli/vecs-cli /usr/local/bin/vecs-cli
 
 RUN mkdir -p /app/models
 

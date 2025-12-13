@@ -1,10 +1,25 @@
-.git
-.vscode
-.DS_Store
+# Ignora la cartella dei modelli (vengono montati come volume, non servono nella build)
+models/
+*.gguf
+
+# Ignora la cartella git (può diventare pesante)
+.git/
+.gitignore
+.gitmodules
+
+# Ignora artefatti di build locali (per non confondere linux con macos/windows)
 obj/
 vecs
-# Ignore local models (Docker will download its own)
-models/
-# CRITICAL: Ignore local build artifacts of llama.cpp
+vecs-cli/obj/
+vecs-cli/vecs-cli
+
+# Ignora build di llama.cpp locale
 vendor/llama.cpp/build/
-vendor/llama.cpp/out/
+vendor/llama.cpp/examples/
+vendor/llama.cpp/models/
+
+# File temporanei e log
+output.txt
+*.log
+.DS_Store
+.env

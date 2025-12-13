@@ -1,3 +1,6 @@
 [submodule "vendor/llama.cpp"]
 	path = vendor/llama.cpp
 	url = https://github.com/ggerganov/llama.cpp.git
+[submodule "vecs-cli"]
+	path = vecs-cli
+	url = https://github.com/riccardogiuriola/vecs-cli

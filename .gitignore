@@ -12,6 +12,7 @@ bin/
 .vscode
 
 vecs
+*vecs-cli
 
 obj
 

@@ -36,6 +36,8 @@ It acts as a middleware between your user and your LLM (e.g., GPT-4, Claude, Lla
 
 - **🔌 VSP Protocol:** Simple, text-based TCP protocol (Redis-like).
 
+- **› vecs-cli:** Command line tool for interacting with the VPS protocol.
+
 ## 🛠️ Architecture
 
 🤖 **Model Support:**
