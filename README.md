@@ -1,8 +1,8 @@
-# ⚡ Vecs: High-Performance Semantic Cache Server
+# ⚡ VECS (Vector Embedding Caching System)
 
-**Vecs** is a lightweight, ultra-fast Semantic Cache server written in **C**. It acts as an intelligent proxy between your application and Large Language Models (LLMs) like OpenAI, Anthropic, or Mistral.
+**VECS** is a high-performance **Semantic Cache** server designed to optimize Large Language Model (LLM) applications.
 
-Instead of forwarding every prompt to the costly LLM API, Vecs checks if a semantically similar question has already been answered and returns the cached response instantly.
+It acts as a middleware between your user and your LLM (e.g., GPT-4, Claude, Llama 3). Instead of performing expensive and slow inference for every query, VECS stores responses and retrieves them using **Semantic Search**. If a user asks a question similar to one already answered, VECS returns the cached response instantly.
 
 > **Scenario:**
 >
@@ -31,6 +31,8 @@ Instead of forwarding every prompt to the costly LLM API, Vecs checks if a seman
 - **♻️ Smart Deduplication:** Prevents cache pollution by detecting and rejecting semantically identical entries.
 
 - **🐳 Docker Ready:** Production-ready container with environment configuration.
+
+- **⏱️ TTL Support (New):** Automatic data expiration. Set a Time-To-Live globally via environment variables or individually per specific key.
 
 - **🔌 VSP Protocol:** Simple, text-based TCP protocol (Redis-like).
 
@@ -75,7 +77,7 @@ graph TD
 Clone recursively to include the inference engine (`llama.cpp`).
 
 ```
-git clone --recursive [https://github.com/riccardogiuriola/vecs-client-node](https://github.com/riccardogiuriola/vecs-client-node)
+git clone --recursive https://github.com/riccardogiuriola/vecs-client-node
 cd vecs
 
 ```
@@ -88,7 +90,7 @@ Vecs requires a GGUF embedding model. We recommend **BGE-M3** (high accuracy) or
 mkdir -p models
 
 # Download BGE-M3 (Quantized 4-bit)
-curl -L -o models/bge-m3-q4_k_m.gguf [https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q4_K_M.gguf](https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q4_K_M.gguf)
+curl -L -o models/bge-m3-q4_k_m.gguf https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q4_K_M.gguf
 
 ```
 
@@ -173,6 +175,8 @@ services:
 | `VECS_L2_THRESHOLD`        | `0.65`             | Minimum cosine similarity (0.0 - 1.0) to consider a request a HIT. Lower = more lenient. |
 | `VECS_L2_DEDUPE_THRESHOLD` | `0.95`             | If a new entry is > 95% similar to an existing one, it is NOT saved (Deduplication).     |
 | `VECS_L2_CAPACITY`         | `5000`             | Maximum number of vectors to keep in RAM.                                                |
+| `VECS_TTL_DEFAULT`         | `3600`             | Default Time-To-Live in seconds (1 hour) for entries without explicit TTL.               |
+| `PORT`.                    | `6379`             | Listening port.                                                                          |
 
 ## 📡 API Protocol (VSP)
 
@@ -183,12 +187,7 @@ Vecs uses **VSP (Vecs Simple Protocol)**, a text-based protocol similar to RESP.
 Stores a prompt and its response in L1 (Exact) and L2 (Semantic).
 
 ```
-*4\r\n
-$3\r\nSET\r\n
-$<len>\r\n<Prompt>\r\n
-$<len>\r\n<Metadata_JSON>\r\n
-$<len>\r\n<Response>\r\n
-
+SET <Prompt> Metadata_JSON> <Response> [ttl_seconds]
 ```
 
 ### QUERY (Retrieve Data)
@@ -196,11 +195,7 @@ $<len>\r\n<Response>\r\n
 Searches L1 first, then calculates embedding and searches L2.
 
 ```
-*3\r\n
-$5\r\nQUERY\r\n
-$<len>\r\n<Prompt>\r\n
-$<len>\r\n<Metadata_JSON>\r\n
-
+QUERY <Prompt> <Metadata_JSON>
 ```
 
 ### DELETE (Remove Data)
@@ -208,11 +203,7 @@ $<len>\r\n<Metadata_JSON>\r\n
 Removes exact match from L1 and semantically similar vectors from L2.
 
 ```
-*3\r\n
-$6\r\nDELETE\r\n
-$<len>\r\n<Prompt>\r\n
-$<len>\r\n<Metadata_JSON>\r\n
-
+DELETE <Prompt> <Metadata_JSON>
 ```
 
 ## 💻 Client Libraries
@@ -238,23 +229,5 @@ await client.set("How do I reset password?", {}, "Go to settings...");
 // Query (Semantic)
 const answer = await client.query("I forgot my password");
 if (answer) console.log("HIT:", answer);
-
-```
-
-## 📂 Project Structure
-
-```
-vecs/
-├── include/       # Header files
-├── src/
-│   ├── core/      # Server loop, Connection handling, Parsing
-│   ├── cache/     # L1 Hash Map & L2 Vector Cache logic
-│   ├── vector/    # AI Engine (Wrapper around llama.cpp)
-│   ├── net/       # Network layer (kqueue/epoll)
-│   └── utils/     # Helpers
-├── vendor/        # Submodules (llama.cpp)
-├── models/        # AI Models storage
-├── Dockerfile     # Production-ready Docker build
-└── Makefile       #
 
 ```

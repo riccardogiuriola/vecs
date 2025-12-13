@@ -18,6 +18,7 @@
 struct hm_node_s {
     char *key;
     char *value;
+    time_t expire_at;
     struct hm_node_s *next;
 };
 
@@ -106,11 +107,14 @@ void hash_map_destroy(hash_map_t *map) {
     log_debug("Hash map distrutta.");
 }
 
-int hash_map_set(hash_map_t *map, const char *key, const char *value) {
+int hash_map_set(hash_map_t *map, const char *key, const char *value, int ttl_seconds) {
     if (!map || !key || !value) return -1;
 
     uint64_t hash = hash_djb2(key);
     size_t index = hash % map->capacity;
+
+    time_t now = time(NULL);
+    time_t expire_at = now + ttl_seconds;
 
     hm_node_t *node = map->buckets[index];
     hm_node_t *prev = NULL;
@@ -126,7 +130,8 @@ int hash_map_set(hash_map_t *map, const char *key, const char *value) {
             }
             free(node->value);
             node->value = new_value;
-            log_debug("Hash map: chiave '%s' aggiornata.", key);
+            node->expire_at = expire_at;
+            log_debug("L1 SET: Chiave '%s' aggiornata (TTL: %ds)", key, ttl_seconds);
             return 0;
         }
         prev = node;
@@ -142,6 +147,7 @@ int hash_map_set(hash_map_t *map, const char *key, const char *value) {
 
     new_node->key = strdup(key);
     new_node->value = strdup(value);
+    new_node->expire_at = expire_at;
     new_node->next = NULL;
 
     if (!new_node->key || !new_node->value) {
@@ -172,13 +178,31 @@ const char* hash_map_get(hash_map_t *map, const char *key) {
 
     uint64_t hash = hash_djb2(key);
     size_t index = hash % map->capacity;
+    time_t now = time(NULL);
 
     hm_node_t *node = map->buckets[index];
+    hm_node_t *prev = NULL;
     while (node) {
         if (strcmp(node->key, key) == 0) {
+
+            log_debug("CHECK KEY: '%s' | Now: %ld | ExpireAt: %ld | Diff: %ld", 
+                      key, (long)now, (long)node->expire_at, (long)(node->expire_at - now));
+
+            if (now > node->expire_at) {
+                log_info("L1 EXPIRED: Chiave '%s' scaduta. Rimozione lazy.", key);
+                
+                // Rimuovi nodo dalla lista
+                if (prev == NULL) map->buckets[index] = node->next;
+                else prev->next = node->next;
+
+                hm_node_destroy(node);
+                map->size--;
+                return NULL; // Tratta come MISS
+            }
             // Trovato!
             return node->value;
         }
+        prev = node;
         node = node->next;
     }
 

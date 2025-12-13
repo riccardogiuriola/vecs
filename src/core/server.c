@@ -38,6 +38,7 @@
 #define DEFAULT_L2_DEDUPE "0.95"
 // Capacità vettoriale di default
 #define DEFAULT_L2_CAPACITY "5000"
+#define DEFAULT_TTL "3600"
 
 /**
  * @brief Configurazione Runtime (caricata da ENV)
@@ -47,6 +48,7 @@ typedef struct {
     float l2_threshold;
     float l2_dedupe_threshold;
     int l2_capacity;
+    int default_ttl;
 } vecs_config_t;
 
 /**
@@ -231,12 +233,21 @@ static void server_execute_command(vecs_connection_t *conn, int argc, char **arg
     // --- COMANDO SET ---
     // *4 $3 SET $prompt $params $response
     if (strcasecmp(argv[0], "SET") == 0) {
-        if (argc != 4) {
+        if (argc < 4 || argc > 5) {
             buffer_append_string(write_buf, "-ERR wrong number of arguments for 'SET'\r\n");
         } else {
+            // 0. Determina TTL
+            int ttl = server->config.default_ttl;
+            if (argc == 5) {
+                ttl = atoi(argv[4]);
+                if (ttl <= 0) ttl = server->config.default_ttl; // Fallback se invalido
+            }
+
+            log_debug("SET Command: prompt='%.20s...', ttl=%d", argv[1], ttl);
+
             // 1. Inserimento L1 (Sempre, perché L1 è exact match per chiave stringa)
             snprintf(key_buf, MAX_L1_KEY_SIZE, "%s|%s", argv[1], argv[2]);
-            hash_map_set(l1_cache, key_buf, argv[3]);
+            hash_map_set(l1_cache, key_buf, argv[3], ttl);
             log_debug("SET L1 OK.");
 
             // 2. Inserimento L2 (Semantic - Con Deduplica Dinamica)
@@ -259,7 +270,7 @@ static void server_execute_command(vecs_connection_t *conn, int argc, char **arg
                     log_info("SET L2 Skipped: Concetto semantico già presente (Score > %.2f)", server->config.l2_dedupe_threshold);
                 } else {
                     // NUOVO CONCETTO -> INSERISCI
-                    l2_cache_insert(server->l2_cache, server->tmp_vector_buf, argv[1], argv[3]);
+                    l2_cache_insert(server->l2_cache, server->tmp_vector_buf, argv[1], argv[3], ttl);
                     log_info("SET L2 OK (Nuovo concetto inserito).");
                 }
 
@@ -382,12 +393,14 @@ vecs_server_t* server_create(const char *port) {
     server->config.l2_threshold = get_env_float("VECS_L2_THRESHOLD", DEFAULT_L2_THRESHOLD);
     server->config.l2_dedupe_threshold = get_env_float("VECS_L2_DEDUPE_THRESHOLD", DEFAULT_L2_DEDUPE);
     server->config.l2_capacity = get_env_int("VECS_L2_CAPACITY", DEFAULT_L2_CAPACITY);
+    server->config.default_ttl = get_env_int("VECS_TTL_DEFAULT", DEFAULT_TTL);
 
     log_info("=== VECS CONFIG ===");
     log_info("Model Path:   %s", server->config.model_path);
     log_info("L2 Threshold: %.2f", server->config.l2_threshold);
     log_info("L2 Dedupe:    %.2f", server->config.l2_dedupe_threshold);
     log_info("L2 Capacity:  %d vectors", server->config.l2_capacity);
+    log_info("Default TTL:  %d seconds", server->config.default_ttl);
     log_info("==================");
     
     // 1. Event Loop

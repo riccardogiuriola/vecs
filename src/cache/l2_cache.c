@@ -4,11 +4,13 @@
 #include <string.h>
 #include <math.h>
 #include <ctype.h>
+#include <time.h>
 
 typedef struct {
     float* vector;
     char* original_prompt;
     char* response;
+    time_t expire_at;
 } l2_entry_t;
 
 struct l2_cache_s {
@@ -38,7 +40,7 @@ void l2_cache_destroy(l2_cache_t* cache) {
     free(cache);
 }
 
-int l2_cache_insert(l2_cache_t* cache, const float* vector, const char* prompt_text, const char* response) {
+int l2_cache_insert(l2_cache_t* cache, const float* vector, const char* prompt_text, const char* response, int ttl_seconds) {
     if (cache->size >= cache->capacity) {
         log_warn("L2 Cache piena!");
         return -1;
@@ -51,6 +53,8 @@ int l2_cache_insert(l2_cache_t* cache, const float* vector, const char* prompt_t
 
     entry->original_prompt = strdup(prompt_text);
     entry->response = strdup(response);
+
+    entry->expire_at = time(NULL) + ttl_seconds;
 
     cache->size++;
     return 0;
@@ -77,8 +81,30 @@ const char* l2_cache_search(l2_cache_t* cache, const float* query_vector, const 
     // Pre-calcolo negazione query per velocità
     int query_has_neg = has_negation(query_text);
     size_t query_len = strlen(query_text);
+    time_t now = time(NULL);
 
     for (size_t i = 0; i < cache->size; i++) {
+
+        // 1. CHECK SCADENZA (Lazy Deletion)
+        if (now > cache->entries[i].expire_at) {
+            // Elemento scaduto: logga e rimuovi
+            // log_debug("L2 EXPIRED: Rimuovo vettore scaduto all'indice %zu", i);
+            
+            // Libera memoria dell'elemento corrente
+            free(cache->entries[i].vector);
+            free(cache->entries[i].original_prompt);
+            free(cache->entries[i].response);
+
+            // Sposta l'ultimo elemento qui (Swap with Last)
+            if (i != cache->size - 1) {
+                cache->entries[i] = cache->entries[cache->size - 1];
+            }
+            
+            cache->size--;
+            i--; // Decrementa i per ricontrollare questo indice (ora contiene il vecchio ultimo elemento)
+            continue; 
+        }
+
         float dot = 0.0f;
         float* v = cache->entries[i].vector;
         
@@ -122,7 +148,7 @@ const char* l2_cache_search(l2_cache_t* cache, const float* query_vector, const 
 
         if (final_score > max_score) {
             max_score = final_score;
-            best_index = i;
+            best_index = (int)i;
         }
     }
 

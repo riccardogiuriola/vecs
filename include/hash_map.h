@@ -6,6 +6,7 @@
 #define VECS_HASH_MAP_H
 
 #include <stddef.h> // Per size_t
+#include <time.h>   // Per time_t
 
 /*
  * Struttura di un nodo nella hash map (gestione collisioni con linked list)
@@ -41,7 +42,7 @@ void hash_map_destroy(hash_map_t *map);
  * @param value Il valore (stringa C).
  * @return 0 in caso di successo, -1 in caso di errore (es. allocazione memoria).
  */
-int hash_map_set(hash_map_t *map, const char *key, const char *value);
+int hash_map_set(hash_map_t *map, const char *key, const char *value, int ttl_seconds);
 
 /**
  * @brief Recupera un valore dalla mappa usando la chiave.
