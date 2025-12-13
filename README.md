@@ -38,6 +38,8 @@ It acts as a middleware between your user and your LLM (e.g., GPT-4, Claude, Lla
 
 - **› vecs-cli:** Command line tool for interacting with the VPS protocol.
 
+- **🗄️ Persistence:** Local persistence of cache data
+
 ## 🛠️ Architecture
 
 🤖 **Model Support:**
