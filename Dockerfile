@@ -51,7 +51,8 @@ COPY --from=builder /app/vecs .
 # Copia CLI compilata in un percorso globale
 COPY --from=builder /app/vecs-cli/vecs-cli /usr/local/bin/vecs-cli
 
-RUN mkdir -p /app/models
+RUN mkdir -p /app/data && \
+    mkdir -p /app/models
 
 # ENV Defaults
 ENV VECS_MODEL_PATH="/app/models/default_model.gguf"
@@ -60,6 +61,6 @@ ENV VECS_L2_DEDUPE_THRESHOLD="0.95"
 ENV VECS_L2_CAPACITY="5000"
 
 EXPOSE 6379
-VOLUME ["/app/models"]
+VOLUME ["/app/data", "/app/models"]
 
 CMD ["./vecs"]

@@ -215,3 +215,116 @@ void l2_cache_clear(l2_cache_t *cache) {
     cache->size = 0;
     log_debug("L2 Cache svuotata.");
 }
+
+int l2_cache_insert_raw(l2_cache_t *cache, float *vector, const char *prompt, const char *resp, time_t expire_at) {
+    if (cache->size >= cache->capacity) return -1;
+
+    l2_entry_t* entry = &cache->entries[cache->size];
+    
+    entry->vector = malloc(cache->vector_dim * sizeof(float));
+    memcpy(entry->vector, vector, cache->vector_dim * sizeof(float));
+
+    entry->original_prompt = strdup(prompt);
+    entry->response = strdup(resp);
+    entry->expire_at = expire_at;
+
+    cache->size++;
+    return 0;
+}
+
+int l2_cache_save(l2_cache_t *cache, FILE *f) {
+    if (!cache || !f) return -1;
+    
+    uint8_t section_id = 0x02; // ID Sezione L2
+    fwrite(&section_id, sizeof(uint8_t), 1, f);
+
+    // Scriviamo la dimensione del vettore per sicurezza (sanity check al load)
+    fwrite(&cache->vector_dim, sizeof(int), 1, f);
+
+    int count = 0;
+    time_t now = time(NULL);
+
+    for (size_t i = 0; i < cache->size; i++) {
+        l2_entry_t *e = &cache->entries[i];
+        if (e->expire_at > now) {
+            // Flag "Valid Entry" = 1
+            uint8_t valid = 1;
+            fwrite(&valid, sizeof(uint8_t), 1, f);
+            
+            // Dati
+            fwrite(e->vector, sizeof(float), cache->vector_dim, f);
+            
+            int p_len = strlen(e->original_prompt);
+            fwrite(&p_len, sizeof(int), 1, f);
+            fwrite(e->original_prompt, sizeof(char), p_len, f);
+
+            int r_len = strlen(e->response);
+            fwrite(&r_len, sizeof(int), 1, f);
+            fwrite(e->response, sizeof(char), r_len, f);
+
+            fwrite(&e->expire_at, sizeof(time_t), 1, f);
+            count++;
+        }
+    }
+
+    // Flag di fine lista = 0
+    uint8_t end_marker = 0;
+    fwrite(&end_marker, sizeof(uint8_t), 1, f);
+
+    log_info("L2 Cache salvata: %d vettori.", count);
+    return 0;
+}
+
+int l2_cache_load(l2_cache_t *cache, FILE *f) {
+    uint8_t section_id;
+    if (fread(&section_id, sizeof(uint8_t), 1, f) != 1 || section_id != 0x02) {
+        log_error("L2 Cache load: Section ID mismatch");
+        return -1;
+    }
+
+    int dim_check;
+    fread(&dim_check, sizeof(int), 1, f);
+    if (dim_check != cache->vector_dim) {
+        log_fatal("L2 Cache load: Dimensione vettori non corrispondente (%d vs %d). File incompatibile.", dim_check, cache->vector_dim);
+        return -1;
+    }
+
+    int loaded = 0;
+    time_t now = time(NULL);
+    float *tmp_vec = malloc(cache->vector_dim * sizeof(float));
+
+    while (1) {
+        uint8_t valid;
+        if (fread(&valid, sizeof(uint8_t), 1, f) != 1) break;
+        if (valid == 0) break; // Fine lista
+
+        fread(tmp_vec, sizeof(float), cache->vector_dim, f);
+
+        int p_len;
+        fread(&p_len, sizeof(int), 1, f);
+        char *prompt = malloc(p_len + 1);
+        fread(prompt, sizeof(char), p_len, f);
+        prompt[p_len] = '\0';
+
+        int r_len;
+        fread(&r_len, sizeof(int), 1, f);
+        char *resp = malloc(r_len + 1);
+        fread(resp, sizeof(char), r_len, f);
+        resp[r_len] = '\0';
+
+        time_t expire_at;
+        fread(&expire_at, sizeof(time_t), 1, f);
+
+        if (expire_at > now) {
+            l2_cache_insert_raw(cache, tmp_vec, prompt, resp, expire_at);
+            loaded++;
+        }
+
+        free(prompt);
+        free(resp);
+    }
+    
+    free(tmp_vec);
+    log_info("L2 Cache caricata: %d vettori.", loaded);
+    return 0;
+}

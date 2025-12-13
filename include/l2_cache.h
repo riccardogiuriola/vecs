@@ -2,6 +2,8 @@
 #define VECS_L2_CACHE_H
 
 #include <stddef.h>
+#include <time.h>   // <--- AGGIUNGI QUESTO (per time_t)
+#include <stdio.h>
 
 typedef struct l2_cache_s l2_cache_t;
 
@@ -22,5 +24,14 @@ int l2_cache_delete_semantic(l2_cache_t *cache, const float *query_vector);
 
 // Svuota cache l2
 void l2_cache_clear(l2_cache_t *cache);
+
+// Salva cache vettoriale
+int l2_cache_save(l2_cache_t *cache, FILE *f);
+
+// Carica cache vettoriale
+int l2_cache_load(l2_cache_t *cache, FILE *f);
+
+// Funzione helper interna per inserire direttamente dati grezzi senza embedding
+int l2_cache_insert_raw(l2_cache_t *cache, float *vector, const char *prompt, const char *resp, time_t expire_at);
 
 #endif // VECS_L2_CACHE_H

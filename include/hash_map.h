@@ -7,6 +7,7 @@
 
 #include <stddef.h> // Per size_t
 #include <time.h>   // Per time_t
+#include <stdio.h>
 
 /*
  * Struttura di un nodo nella hash map (gestione collisioni con linked list)
@@ -66,5 +67,11 @@ void hash_map_delete(hash_map_t *map, const char *key);
  * * @param map La mappa.
  */
 void hash_map_clear(hash_map_t *map);
+
+// Salva tutto il contenuto su un file aperto
+int hash_map_save(hash_map_t *map, FILE *f);
+
+// Carica contenuto da file (ignora chiavi scadute)
+int hash_map_load(hash_map_t *map, FILE *f);
 
 #endif // VECS_HASH_MAP_H

@@ -22,6 +22,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 
 // Configurazioni Statiche
 #define MAX_FD 65536
@@ -39,6 +40,9 @@
 // Capacità vettoriale di default
 #define DEFAULT_L2_CAPACITY "5000"
 #define DEFAULT_TTL "3600"
+#define DEFAULT_SAVE_INTERVAL "300"
+#define DUMP_DIR "data"
+#define DUMP_FILENAME "data/dump.vecs"
 
 /**
  * @brief Configurazione Runtime (caricata da ENV)
@@ -49,6 +53,7 @@ typedef struct {
     float l2_dedupe_threshold;
     int l2_capacity;
     int default_ttl;
+    int save_interval_seconds;
 } vecs_config_t;
 
 /**
@@ -69,6 +74,8 @@ struct vecs_server_s {
     
     float *tmp_vector_buf;       // Buffer per embedding
     int vector_dim;              // Dimensione vettori (letto dal modello)
+
+    time_t last_save_time;
 
     // Gestione connessioni
     vecs_connection_t *connections[MAX_FD];
@@ -101,7 +108,8 @@ static void server_handle_client_read(vecs_connection_t *conn);
 static void server_handle_client_write(vecs_connection_t *conn);
 static void server_execute_command(vecs_connection_t *conn, int argc, char **argv);
 void server_remove_connection(vecs_connection_t *conn);
-
+static void server_save_data(vecs_server_t *server);
+static void server_load_data(vecs_server_t *server);
 
 // --- Gestori Eventi (Network) ---
 
@@ -375,6 +383,9 @@ static void server_execute_command(vecs_connection_t *conn, int argc, char **arg
         log_info("FLUSH COMMAND: Cache L1 e L2 svuotate completamente.");
         buffer_append_string(write_buf, "+OK\r\n");
 
+    } else if (strcasecmp(argv[0], "SAVE") == 0) {
+        server_save_data(server);
+        buffer_append_string(write_buf, "+OK\r\n");
     } else {
         snprintf(header_buf, sizeof(header_buf), "-ERR unknown command '%s'\r\n", argv[0]);
         buffer_append_string(write_buf, header_buf);
@@ -404,6 +415,8 @@ vecs_server_t* server_create(const char *port) {
     server->config.l2_dedupe_threshold = get_env_float("VECS_L2_DEDUPE_THRESHOLD", DEFAULT_L2_DEDUPE);
     server->config.l2_capacity = get_env_int("VECS_L2_CAPACITY", DEFAULT_L2_CAPACITY);
     server->config.default_ttl = get_env_int("VECS_TTL_DEFAULT", DEFAULT_TTL);
+    server->config.save_interval_seconds = get_env_int("VECS_SAVE_INTERVAL", DEFAULT_SAVE_INTERVAL);
+    server->last_save_time = time(NULL);
 
     log_info("=== VECS CONFIG ===");
     log_info("Model Path:   %s", server->config.model_path);
@@ -411,7 +424,22 @@ vecs_server_t* server_create(const char *port) {
     log_info("L2 Dedupe:    %.2f", server->config.l2_dedupe_threshold);
     log_info("L2 Capacity:  %d vectors", server->config.l2_capacity);
     log_info("Default TTL:  %d seconds", server->config.default_ttl);
+    log_info("Auto-Save:    Every %d seconds", server->config.save_interval_seconds);
     log_info("==================");
+
+    // CREAZIONE CARTELLA DATI
+    struct stat st = {0};
+    if (stat(DUMP_DIR, &st) == -1) {
+        // 0700 = rwx------ (Solo il proprietario può leggere/scrivere/entrare)
+        // Se sei su Docker, questo corrisponde all'utente che esegue il processo (spesso root o app user)
+        if (mkdir(DUMP_DIR, 0700) == -1) {
+            log_fatal("Impossibile creare la directory '%s': %s", DUMP_DIR, strerror(errno));
+            free(server->events);
+            free(server);
+            return NULL;
+        }
+        log_info("Creata directory dati: ./%s", DUMP_DIR);
+    }
     
     // 1. Event Loop
     server->loop = el_create(MAX_FD);
@@ -461,12 +489,14 @@ vecs_server_t* server_create(const char *port) {
         return NULL;
     }
 
+    server_load_data(server);
     log_info("Vecs Server avviato. Listening :%s. Vector Dim: %d", port, server->vector_dim);
     return server;
 }
 
 void server_destroy(vecs_server_t *server) {
     if (server == NULL) return;
+    server_save_data(server);
 
     log_info("Arresto server...");
 
@@ -497,7 +527,7 @@ int server_run(vecs_server_t *server) {
     log_info("Loop eventi in esecuzione...");
 
     while (1) {
-        int num_events = el_poll(server->loop, server->events, -1);
+        int num_events = el_poll(server->loop, server->events, 1000);
 
         if (num_events == -1) {
             if (errno == EINTR) continue;
@@ -512,6 +542,16 @@ int server_run(vecs_server_t *server) {
                 server_handle_new_connection(server);
             } else {
                 server_handle_client_event(event);
+            }
+        }
+
+        if (server->config.save_interval_seconds > 0) {
+            time_t now = time(NULL);
+            if (now - server->last_save_time >= server->config.save_interval_seconds) {
+                // È ora di salvare!
+                log_debug("Auto-save timer scattato.");
+                server_save_data(server);
+                server->last_save_time = now; // Resetta timer
             }
         }
     }
@@ -564,4 +604,46 @@ event_loop_t* server_get_loop(vecs_server_t *server) {
 
 hash_map_t* server_get_l1_cache(vecs_server_t *server) {
     return server->l1_cache;
+}
+
+static void server_save_data(vecs_server_t *server) {
+    log_info("Salvataggio dati su disco (%s)...", DUMP_FILENAME);
+    FILE *f = fopen(DUMP_FILENAME, "wb");
+    if (!f) {
+        log_error("Impossibile aprire file dump per scrittura: %s", strerror(errno));
+        return;
+    }
+
+    // Magic Header "VECS01"
+    fwrite("VECS01", 1, 6, f);
+
+    hash_map_save(server->l1_cache, f);
+    l2_cache_save(server->l2_cache, f);
+
+    fclose(f);
+    log_info("Salvataggio completato.");
+}
+
+static void server_load_data(vecs_server_t *server) {
+    if (access(DUMP_FILENAME, F_OK) == -1) {
+        log_info("Nessun file dump trovato. Avvio a vuoto.");
+        return;
+    }
+
+    log_info("Caricamento dati da %s...", DUMP_FILENAME);
+    FILE *f = fopen(DUMP_FILENAME, "rb");
+    if (!f) return;
+
+    char magic[7] = {0};
+    fread(magic, 1, 6, f);
+    if (strcmp(magic, "VECS01") != 0) {
+        log_error("Header file dump non valido o versione errata.");
+        fclose(f);
+        return;
+    }
+
+    hash_map_load(server->l1_cache, f);
+    l2_cache_load(server->l2_cache, f);
+
+    fclose(f);
 }

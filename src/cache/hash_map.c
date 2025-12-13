@@ -255,3 +255,89 @@ void hash_map_clear(hash_map_t *map) {
     map->size = 0;
     log_debug("L1 Cache svuotata.");
 }
+
+int hash_map_save(hash_map_t *map, FILE *f) {
+    if (!map || !f) return -1;
+    
+    int count = 0;
+    time_t now = time(NULL);
+
+    // Scriviamo un header per la sezione L1 (numero di elementi stimato o placeholder)
+    // Per semplicità, iteriamo e scriviamo sequenzialmente.
+    
+    // Marcatore inizio sezione L1
+    uint8_t section_id = 0x01; 
+    fwrite(&section_id, sizeof(uint8_t), 1, f);
+
+    for (size_t i = 0; i < map->capacity; i++) {
+        hm_node_t *node = map->buckets[i];
+        while (node) {
+            // Salva solo se non è già scaduto
+            if (node->expire_at > now) {
+                int key_len = strlen(node->key);
+                int val_len = strlen(node->value);
+
+                fwrite(&key_len, sizeof(int), 1, f);
+                fwrite(node->key, sizeof(char), key_len, f);
+                fwrite(&val_len, sizeof(int), 1, f);
+                fwrite(node->value, sizeof(char), val_len, f);
+                fwrite(&node->expire_at, sizeof(time_t), 1, f);
+                count++;
+            }
+            node = node->next;
+        }
+    }
+    
+    // Marcatore fine sezione (key_len -1 o simile, o semplicemente gestito dal caller)
+    // Usiamo un key_len speciale 0 per dire "fine lista"
+    int end_marker = 0;
+    fwrite(&end_marker, sizeof(int), 1, f);
+    
+    log_info("Hash Map salvata: %d chiavi.", count);
+    return 0;
+}
+
+int hash_map_load(hash_map_t *map, FILE *f) {
+    uint8_t section_id;
+    if (fread(&section_id, sizeof(uint8_t), 1, f) != 1 || section_id != 0x01) {
+        log_error("Formato file corrotto (L1 header missing)");
+        return -1;
+    }
+
+    int loaded_count = 0;
+    time_t now = time(NULL);
+
+    while (1) {
+        int key_len;
+        if (fread(&key_len, sizeof(int), 1, f) != 1) break; // EOF o errore
+        
+        if (key_len == 0) break; // Fine sezione
+
+        char *key = malloc(key_len + 1);
+        fread(key, sizeof(char), key_len, f);
+        key[key_len] = '\0';
+
+        int val_len;
+        fread(&val_len, sizeof(int), 1, f);
+        char *val = malloc(val_len + 1);
+        fread(val, sizeof(char), val_len, f);
+        val[val_len] = '\0';
+
+        time_t expire_at;
+        fread(&expire_at, sizeof(time_t), 1, f);
+
+        // Controllo TTL al caricamento
+        if (expire_at > now) {
+            // Calcoliamo il TTL rimanente
+            int ttl = (int)(expire_at - now);
+            hash_map_set(map, key, val, ttl);
+            loaded_count++;
+        }
+
+        free(key);
+        free(val);
+    }
+    
+    log_info("Hash Map caricata: %d chiavi.", loaded_count);
+    return 0;
+}
