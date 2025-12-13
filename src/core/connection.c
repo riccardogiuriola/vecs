@@ -17,8 +17,11 @@
 
 #define CONN_INITIAL_BUFFER_SIZE 1024
 
+static uint64_t global_conn_id_counter = 0;
+
 // Struct interna
 struct vecs_connection_s {
+    uint64_t id;
     int fd;
     vecs_server_t *server;
     vecs_connection_state_t state;
@@ -36,6 +39,7 @@ vecs_connection_t* connection_create(vecs_server_t *server, int fd) {
         return NULL;
     }
 
+    conn->id = ++global_conn_id_counter;
     conn->fd = fd;
     conn->server = server;
     conn->state = STATE_READING;
@@ -101,4 +105,8 @@ vecs_connection_state_t connection_get_state(vecs_connection_t *conn) {
 }
 void connection_set_state(vecs_connection_t *conn, vecs_connection_state_t state) {
     conn->state = state;
+}
+
+uint64_t connection_get_id(vecs_connection_t *conn) {
+    return conn->id;
 }

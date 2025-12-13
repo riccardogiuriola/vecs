@@ -15,7 +15,8 @@
 typedef struct vecs_server_s vecs_server_t;
 typedef struct vecs_connection_s vecs_connection_t;
 typedef struct event_loop_s event_loop_t;
-typedef struct hash_map_s hash_map_t; // <-- AGGIUNTO
+typedef struct hash_map_s hash_map_t;
+typedef struct vector_engine_s vector_engine_t;
 
 /**
  * @brief Crea una nuova istanza del server.
@@ -67,6 +68,8 @@ event_loop_t *server_get_loop(vecs_server_t *server);
  * * @param server Il server.
  * @return Il puntatore alla hash_map_t.
  */
-hash_map_t *server_get_l1_cache(vecs_server_t *server); // <-- AGGIUNTO
+hash_map_t *server_get_l1_cache(vecs_server_t *server);
+
+vector_engine_t *server_get_engine(vecs_server_t *server);
 
 #endif // VECS_SERVER_H

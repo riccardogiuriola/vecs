@@ -6,6 +6,7 @@
 #define VECS_CONNECTION_H
 
 #include <stddef.h> // Per size_t
+#include <stdint.h>
 
 /*
  * Handle opachi.
@@ -50,6 +51,7 @@ buffer_t *connection_get_read_buffer(vecs_connection_t *conn);
 buffer_t *connection_get_write_buffer(vecs_connection_t *conn);
 vsp_parser_t *connection_get_parser(vecs_connection_t *conn);
 vecs_connection_state_t connection_get_state(vecs_connection_t *conn);
+uint64_t connection_get_id(vecs_connection_t *conn);
 
 // --- Setters per l'accesso opaco ---
 

@@ -15,6 +15,7 @@
 #include "vector_engine.h"
 #include "l2_cache.h"
 #include "text.h"
+#include "worker_pool.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -54,6 +55,7 @@ typedef struct {
     int l2_capacity;
     int default_ttl;
     int save_interval_seconds;
+    int num_workers;
 } vecs_config_t;
 
 /**
@@ -76,6 +78,7 @@ struct vecs_server_s {
     int vector_dim;              // Dimensione vettori (letto dal modello)
 
     time_t last_save_time;
+    worker_pool_t *worker_pool;
 
     // Gestione connessioni
     vecs_connection_t *connections[MAX_FD];
@@ -110,6 +113,7 @@ static void server_execute_command(vecs_connection_t *conn, int argc, char **arg
 void server_remove_connection(vecs_connection_t *conn);
 static void server_save_data(vecs_server_t *server);
 static void server_load_data(vecs_server_t *server);
+static void server_handle_worker_notification(vecs_server_t *server);
 
 // --- Gestori Eventi (Network) ---
 
@@ -234,166 +238,212 @@ static void server_execute_command(vecs_connection_t *conn, int argc, char **arg
     buffer_t *write_buf = connection_get_write_buffer(conn);
     hash_map_t *l1_cache = server->l1_cache;
     int fd = connection_get_fd(conn);
+    uint64_t conn_id = connection_get_id(conn); // Necessario per sicurezza asincrona
 
     char key_buf[MAX_L1_KEY_SIZE];
     char header_buf[64];
+    char clean_prompt[4096]; // Buffer per normalizzazione testo
 
     // --- COMANDO SET ---
-    // *4 $3 SET $prompt $params $response
+    // Sintassi: SET <prompt> <params> <response> [ttl]
     if (strcasecmp(argv[0], "SET") == 0) {
         if (argc < 4 || argc > 5) {
             buffer_append_string(write_buf, "-ERR wrong number of arguments for 'SET'\r\n");
-        } else {
-            // 0. Determina TTL
-            int ttl = server->config.default_ttl;
-            if (argc == 5) {
-                ttl = atoi(argv[4]);
-                if (ttl <= 0) ttl = server->config.default_ttl; // Fallback se invalido
-            }
-
-            log_debug("SET Command: prompt='%.20s...', ttl=%d", argv[1], ttl);
-
-            // 1. Inserimento L1 (Sempre, perché L1 è exact match per chiave stringa)
-            snprintf(key_buf, MAX_L1_KEY_SIZE, "%s|%s", argv[1], argv[2]);
-            hash_map_set(l1_cache, key_buf, argv[3], ttl);
-            log_debug("SET L1 OK.");
-
-            // 2. Inserimento L2 (Semantic - Con Deduplica Dinamica)
-            // Calcoliamo l'embedding del prompt
-            char clean_prompt[4096];
-            normalize_text(argv[1], clean_prompt, sizeof(clean_prompt));
-            if (vector_engine_embed(server->vec_engine, clean_prompt, server->tmp_vector_buf) == 0) {
-                
-                // STEP DEDUPLICAZIONE:
-                // Usiamo la soglia configurata (es. 0.95) per vedere se esiste già
-                const char *existing = l2_cache_search(
-                    server->l2_cache, 
-                    server->tmp_vector_buf, 
-                    argv[1],
-                    server->config.l2_dedupe_threshold
-                );
-
-                if (existing != NULL) {
-                    // DUPLICATO TROVATO!
-                    log_info("SET L2 Skipped: Concetto semantico già presente (Score > %.2f)", server->config.l2_dedupe_threshold);
-                } else {
-                    // NUOVO CONCETTO -> INSERISCI
-                    l2_cache_insert(server->l2_cache, server->tmp_vector_buf, argv[1], argv[3], ttl);
-                    log_info("SET L2 OK (Nuovo concetto inserito).");
-                }
-
-            } else {
-                log_error("SET L2 Fallito: Errore embedding.");
-            }
-
-            buffer_append_string(write_buf, "+OK\r\n");
+            el_enable_write(server->loop, fd, (void*)conn);
+            return;
         }
-    
+
+        // 0. Determina TTL
+        int ttl = server->config.default_ttl;
+        if (argc == 5) {
+            ttl = atoi(argv[4]);
+            if (ttl <= 0) ttl = server->config.default_ttl;
+        }
+
+        // 1. Inserimento L1 (Sincrono, è velocissimo O(1))
+        snprintf(key_buf, MAX_L1_KEY_SIZE, "%s|%s", argv[1], argv[2]);
+        hash_map_set(l1_cache, key_buf, argv[3], ttl);
+        log_debug("SET L1 OK (Sync). Preparing Async L2...");
+
+        // 2. Inserimento L2 (ASINCRONO)
+        // Normalizziamo qui nel main thread (operazione leggera string-based)
+        normalize_text(argv[1], clean_prompt, sizeof(clean_prompt));
+
+        // Creiamo il Job
+        bg_job_t *job = calloc(1, sizeof(bg_job_t));
+        if (!job) {
+            log_error("OOM creating SET job");
+            buffer_append_string(write_buf, "-ERR Server Out of Memory\r\n");
+            el_enable_write(server->loop, fd, (void*)conn);
+            return;
+        }
+
+        job->type = JOB_SET;
+        job->client_fd = fd;
+        job->conn_id = conn_id;
+        job->ttl = ttl;
+        
+        // Copiamo i dati perché argv verrà distrutto al ritorno della funzione
+        job->text_to_embed = strdup(clean_prompt); // Testo pulito per embedding
+        job->key_part_1 = strdup(argv[1]);         // Prompt originale
+        job->value = strdup(argv[3]);              // Risposta da salvare
+        
+        // Inviamo al pool
+        if (wp_submit(server->worker_pool, job) != 0) {
+            buffer_append_string(write_buf, "-ERR Job Queue Full\r\n");
+            // Free manuale se submit fallisce
+            free(job->text_to_embed); free(job->key_part_1); free(job->value); free(job);
+            el_enable_write(server->loop, fd, (void*)conn);
+        }
+
+        // NOTA: NON inviamo "+OK" qui! 
+        // Lo farà server_handle_worker_notification quando il worker avrà finito.
+        return; 
+    }
+
     // --- COMANDO QUERY ---
-    // *3 $5 QUERY $prompt $params
-    } else if (strcasecmp(argv[0], "QUERY") == 0) {
+    // Sintassi: QUERY <prompt> <params>
+    else if (strcasecmp(argv[0], "QUERY") == 0) {
         if (argc != 3) {
             buffer_append_string(write_buf, "-ERR wrong number of arguments for 'QUERY'\r\n");
-        } else {
-            // A. L1
-            snprintf(key_buf, MAX_L1_KEY_SIZE, "%s|%s", argv[1], argv[2]);
-            const char *value = hash_map_get(l1_cache, key_buf);
-            
-            if (value != NULL) {
-                // HIT L1
-                size_t val_len = strlen(value);
-                snprintf(header_buf, sizeof(header_buf), "$%zu\r\n", val_len);
-                buffer_append_string(write_buf, header_buf);
-                buffer_append_data(write_buf, value, val_len);
-                buffer_append_string(write_buf, "\r\n");
-                
-            } else {
-                // MISS L1 -> L2
-                log_debug("MISS L1. Provo Semantic Search L2...");
-
-                // Embedding della query (PURO, senza prefissi per BGE-M3/MiniLM)
-                char clean_prompt[4096];
-                normalize_text(argv[1], clean_prompt, sizeof(clean_prompt));
-                if (vector_engine_embed(server->vec_engine, clean_prompt, server->tmp_vector_buf) == 0) {
-                    
-                    const char *semantic_val = l2_cache_search(
-                        server->l2_cache, 
-                        server->tmp_vector_buf,
-                        argv[1],
-                        server->config.l2_threshold
-                    );
-
-                    if (semantic_val != NULL) {
-                        // HIT L2
-                        log_info("HIT L2 (Semantic Match)!");
-                        
-                        size_t val_len = strlen(semantic_val);
-                        snprintf(header_buf, sizeof(header_buf), "$%zu\r\n", val_len);
-                        buffer_append_string(write_buf, header_buf);
-                        buffer_append_data(write_buf, semantic_val, val_len);
-                        buffer_append_string(write_buf, "\r\n");
-                    } else {
-                        // MISS TOTALE
-                        log_debug("MISS L2 (Nessuna similarità > %.2f)", server->config.l2_threshold);
-                        buffer_append_string(write_buf, "$-1\r\n");
-                    }
-                } else {
-                    buffer_append_string(write_buf, "-ERR Embedding Failed\r\n");
-                }
-            }
+            el_enable_write(server->loop, fd, (void*)conn);
+            return;
         }
-    } else if (strcasecmp(argv[0], "DELETE") == 0) {
+
+        // A. Cerca in L1 (Sincrono)
+        snprintf(key_buf, MAX_L1_KEY_SIZE, "%s|%s", argv[1], argv[2]);
+        const char *value = hash_map_get(l1_cache, key_buf);
+        
+        if (value != NULL) {
+            // HIT L1: Rispondiamo subito!
+            size_t val_len = strlen(value);
+            snprintf(header_buf, sizeof(header_buf), "$%zu\r\n", val_len);
+            buffer_append_string(write_buf, header_buf);
+            buffer_append_data(write_buf, value, val_len);
+            buffer_append_string(write_buf, "\r\n");
+            
+            // Abilita scrittura e chiudi
+            el_enable_write(server->loop, fd, (void*)conn);
+            return;
+        }
+
+        // B. MISS L1 -> Cerca in L2 (ASINCRONO)
+        log_debug("MISS L1. Scheduling Async L2 Search...");
+
+        normalize_text(argv[1], clean_prompt, sizeof(clean_prompt));
+
+        bg_job_t *job = calloc(1, sizeof(bg_job_t));
+        if (!job) {
+            buffer_append_string(write_buf, "-ERR Server OOM\r\n");
+            el_enable_write(server->loop, fd, (void*)conn);
+            return;
+        }
+
+        job->type = JOB_QUERY;
+        job->client_fd = fd;
+        job->conn_id = conn_id;
+        
+        job->text_to_embed = strdup(clean_prompt);
+        job->key_part_1 = strdup(argv[1]); // Serve per i filtri semantici dopo
+
+        if (wp_submit(server->worker_pool, job) != 0) {
+            buffer_append_string(write_buf, "-ERR Job Queue Full\r\n");
+            free(job->text_to_embed); free(job->key_part_1); free(job);
+            el_enable_write(server->loop, fd, (void*)conn);
+        }
+
+        // NON rispondiamo ancora. Attendiamo il worker.
+        return;
+    }
+
+    // --- COMANDO DELETE ---
+    // Sintassi: DELETE <prompt> <params>
+    else if (strcasecmp(argv[0], "DELETE") == 0) {
         if (argc != 3) {
             buffer_append_string(write_buf, "-ERR wrong number of arguments for 'DELETE'\r\n");
-        } else {
-            int deleted_count = 0;
-
-            // 1. Cancella da L1 (Exact Match)
-            snprintf(key_buf, MAX_L1_KEY_SIZE, "%s|%s", argv[1], argv[2]);
-            
-            // Nota: hash_map_delete è void, ma assumiamo cancelli se esiste.
-            // Se volessimo contare, dovremmo modificare hash_map_delete per ritornare int.
-            // Per ora procediamo.
-            hash_map_delete(l1_cache, key_buf);
-            // Diciamo che L1 conta come 1 se c'era (non lo sappiamo con l'API attuale, ma fa nulla)
-            
-            // 2. Cancella da L2 (Semantic Match)
-            // Calcoliamo l'embedding del prompt da cancellare
-            char clean_prompt[4096];
-            normalize_text(argv[1], clean_prompt, sizeof(clean_prompt));
-            if (vector_engine_embed(server->vec_engine, clean_prompt, server->tmp_vector_buf) == 0) {
-                if (l2_cache_delete_semantic(server->l2_cache, server->tmp_vector_buf)) {
-                    deleted_count++;
-                }
-            }
-
-            // Rispondiamo con un Intero (formato RESP ":<num>\r\n") 
-            // oppure OK per semplicità. Usiamo OK per coerenza col client attuale.
-            buffer_append_string(write_buf, "+OK\r\n");
-            
-            log_info("DELETE eseguito per '%s' (L2 rimossi: %d)", argv[1], deleted_count);
+            el_enable_write(server->loop, fd, (void*)conn);
+            return;
         }
-    } else if (strcasecmp(argv[0], "FLUSH") == 0) {
-        // Svuota L1
-        hash_map_clear(l1_cache);
-        
-        // Svuota L2
-        l2_cache_clear(server->l2_cache);
-        
-        log_info("FLUSH COMMAND: Cache L1 e L2 svuotate completamente.");
-        buffer_append_string(write_buf, "+OK\r\n");
 
-    } else if (strcasecmp(argv[0], "SAVE") == 0) {
+        // 1. Cancella da L1 (Sincrono)
+        snprintf(key_buf, MAX_L1_KEY_SIZE, "%s|%s", argv[1], argv[2]);
+        hash_map_delete(l1_cache, key_buf);
+
+        // 2. Cancella da L2 (ASINCRONO)
+        // Anche se DELETE è rara, calcolare l'embedding per trovarlo è lento.
+        normalize_text(argv[1], clean_prompt, sizeof(clean_prompt));
+
+        bg_job_t *job = calloc(1, sizeof(bg_job_t));
+        job->type = JOB_DELETE;
+        job->client_fd = fd;
+        job->conn_id = conn_id;
+        job->text_to_embed = strdup(clean_prompt);
+        // Non serve key_part_1 per delete semantic, basta il vettore
+
+        if (wp_submit(server->worker_pool, job) != 0) {
+             // Fallback se coda piena: rispondi OK lo stesso (L1 è cancellato)
+             // o manda errore. Per robustezza, mandiamo errore.
+             buffer_append_string(write_buf, "-ERR Job Queue Full\r\n");
+             free(job->text_to_embed); free(job);
+        }
+        
+        // Attendiamo worker per la risposta definitiva
+        return;
+    }
+
+    // --- COMANDO FLUSH ---
+    else if (strcasecmp(argv[0], "FLUSH") == 0) {
+        hash_map_clear(l1_cache);
+        l2_cache_clear(server->l2_cache);
+        log_info("FLUSH: Cache L1 e L2 svuotate.");
+        buffer_append_string(write_buf, "+OK\r\n");
+        el_enable_write(server->loop, fd, (void*)conn);
+    }
+
+    // --- COMANDO SAVE ---
+    else if (strcasecmp(argv[0], "SAVE") == 0) {
+        // SAVE rimane sincrono per ora (blocca il server per sicurezza dati)
+        // In futuro si può fare fork() come Redis
         server_save_data(server);
         buffer_append_string(write_buf, "+OK\r\n");
-    } else {
-        snprintf(header_buf, sizeof(header_buf), "-ERR unknown command '%s'\r\n", argv[0]);
-        buffer_append_string(write_buf, header_buf);
+        el_enable_write(server->loop, fd, (void*)conn);
     }
     
-    el_enable_write(server->loop, fd, (void*)conn);
+    // --- COMANDO SCONOSCIUTO ---
+    else {
+        snprintf(header_buf, sizeof(header_buf), "-ERR unknown command '%s'\r\n", argv[0]);
+        buffer_append_string(write_buf, header_buf);
+        el_enable_write(server->loop, fd, (void*)conn);
+    }
 }
 
+vector_engine_t *server_get_engine(vecs_server_t *server) {
+    return server->vec_engine;
+}
+
+static int get_optimal_worker_count(void) {
+    // 1. Controlla ENV
+    const char *val = getenv("VECS_NUM_WORKERS");
+    if (val) {
+        int env_count = atoi(val);
+        if (env_count > 0) {
+            return env_count;
+        }
+    }
+
+    // 2. Controlla CPU Cores (nproc)
+    long nprocs = -1;
+#ifdef _SC_NPROCESSORS_ONLN
+    nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+#endif
+
+    if (nprocs > 0) {
+        return (int)nprocs;
+    }
+
+    // 3. Fallback di sicurezza
+    return 4;
+}
 
 // --- Init & Lifecycle ---
 
@@ -416,6 +466,7 @@ vecs_server_t* server_create(const char *port) {
     server->config.l2_capacity = get_env_int("VECS_L2_CAPACITY", DEFAULT_L2_CAPACITY);
     server->config.default_ttl = get_env_int("VECS_TTL_DEFAULT", DEFAULT_TTL);
     server->config.save_interval_seconds = get_env_int("VECS_SAVE_INTERVAL", DEFAULT_SAVE_INTERVAL);
+    server->config.num_workers = get_optimal_worker_count();
     server->last_save_time = time(NULL);
 
     log_info("=== VECS CONFIG ===");
@@ -425,6 +476,7 @@ vecs_server_t* server_create(const char *port) {
     log_info("L2 Capacity:  %d vectors", server->config.l2_capacity);
     log_info("Default TTL:  %d seconds", server->config.default_ttl);
     log_info("Auto-Save:    Every %d seconds", server->config.save_interval_seconds);
+    log_info("AI Workers:   %d threads", server->config.num_workers);
     log_info("==================");
 
     // CREAZIONE CARTELLA DATI
@@ -457,11 +509,21 @@ vecs_server_t* server_create(const char *port) {
 
     // 3. AI Vector Engine
     log_info("Caricamento modello AI...");
-    server->vec_engine = vector_engine_init(server->config.model_path);
+    int num_workers = server->config.num_workers;
+    int queue_limit = 1000;
+    server->vec_engine = vector_engine_init(server->config.model_path, num_workers);
     if (!server->vec_engine) {
         log_fatal("ERRORE CRITICO: Impossibile caricare il modello GGUF da '%s'.", server->config.model_path);
         // Clean up parziale...
         return NULL;
+    }
+
+    // Crea pool con 4 worker (o pari a nproc)
+    server->worker_pool = wp_create(server, num_workers, queue_limit);
+    // Aggiungi la PIPE di notifica all'Event Loop
+    int notify_fd = wp_get_notify_fd(server->worker_pool);
+    if (el_add_fd_read(server->loop, notify_fd, (void*)server) == -1) { // Nota: udata è server per distinguerlo
+        log_fatal("Impossibile aggiungere notify_fd al loop");
     }
 
     // Ottieni dimensione embedding (dinamica, letta dal modello)
@@ -516,6 +578,7 @@ void server_destroy(vecs_server_t *server) {
     l2_cache_destroy(server->l2_cache);
     free(server->tmp_vector_buf);
 
+    wp_destroy(server->worker_pool);
     el_destroy(server->loop);
     free(server->events);
     free(server);
@@ -537,10 +600,16 @@ int server_run(vecs_server_t *server) {
 
         for (int i = 0; i < num_events; i++) {
             vecs_event_t *event = &server->events[i];
+
+            int notify_fd = wp_get_notify_fd(server->worker_pool);
             
-            if (event->udata == server) {
-                server_handle_new_connection(server);
-            } else {
+            if (event->fd == server->listen_fd) {
+             server_handle_new_connection(server);
+            } 
+            else if (event->fd == notify_fd) {
+                server_handle_worker_notification(server);
+            }
+            else {
                 server_handle_client_event(event);
             }
         }
@@ -646,4 +715,101 @@ static void server_load_data(vecs_server_t *server) {
     l2_cache_load(server->l2_cache, f);
 
     fclose(f);
+}
+
+static void server_handle_worker_notification(vecs_server_t *server) {
+    while (1) {
+        // 1. Legge il puntatore al job dalla pipe
+        bg_job_t *job = wp_read_completed_job(server->worker_pool);
+        if (!job) break; // Pipe vuota, nessun altro lavoro completato
+
+        // 2. Recupera la connessione associata
+        // Attenzione: dobbiamo verificare che esista ancora e che sia LA STESSA connessione
+        // (il socket potrebbe essere stato chiuso e riaperto da un altro client)
+        if (job->client_fd < 0 || job->client_fd >= MAX_FD) {
+            log_warn("Async Job: FD non valido (%d)", job->client_fd);
+            goto cleanup;
+        }
+
+        vecs_connection_t *conn = server->connections[job->client_fd];
+
+        // Se la connessione è nulla o l'ID non corrisponde, il client si è disconnesso nel frattempo.
+        if (!conn || connection_get_id(conn) != job->conn_id) {
+            log_info("Async Job ignorato: il client (fd %d) si è disconnesso.", job->client_fd);
+            goto cleanup;
+        }
+
+        buffer_t *write_buf = connection_get_write_buffer(conn);
+        char header_buf[64];
+
+        if (!job->success) {
+            // Caso Errore nel Worker (es. fallimento allocazione o modello)
+            buffer_append_string(write_buf, "-ERR Vector Embedding Failed\r\n");
+        } else {
+            // --- LOGICA SPECIFICA PER TIPO DI JOB ---
+
+            if (job->type == JOB_SET) {
+                // Il vettore è calcolato. Ora facciamo la DEDUPLICA e INSERIMENTO L2.
+                // Questo avviene nel Main Thread, quindi è thread-safe per la cache.
+                
+                const char *existing = l2_cache_search(
+                    server->l2_cache, 
+                    job->vector_result, 
+                    job->key_part_1, // Il prompt originale
+                    server->config.l2_dedupe_threshold
+                );
+                
+                if (existing != NULL) {
+                    log_info("Async SET L2 Skipped: Concetto già presente.");
+                } else {
+                    l2_cache_insert(server->l2_cache, job->vector_result, job->key_part_1, job->value, job->ttl);
+                    log_info("Async SET L2 OK.");
+                }
+                
+                buffer_append_string(write_buf, "+OK\r\n");
+
+            } else if (job->type == JOB_QUERY) {
+                // Il vettore query è pronto. Eseguiamo la ricerca L2.
+                
+                const char *semantic_val = l2_cache_search(
+                    server->l2_cache,
+                    job->vector_result,
+                    job->key_part_1, // Il prompt originale (usato per i filtri text-based)
+                    server->config.l2_threshold
+                );
+
+                if (semantic_val != NULL) {
+                    // HIT L2
+                    size_t val_len = strlen(semantic_val);
+                    snprintf(header_buf, sizeof(header_buf), "$%zu\r\n", val_len);
+                    buffer_append_string(write_buf, header_buf);
+                    buffer_append_data(write_buf, semantic_val, val_len);
+                    buffer_append_string(write_buf, "\r\n");
+                    log_info("Async HIT L2 (Semantic)");
+                } else {
+                    // MISS L2
+                    buffer_append_string(write_buf, "$-1\r\n");
+                    log_debug("Async MISS L2");
+                }
+
+            } else if (job->type == JOB_DELETE) {
+                // Il vettore del prompt da cancellare è pronto.
+                int deleted = l2_cache_delete_semantic(server->l2_cache, job->vector_result);
+                log_info("Async DELETE L2 completed. Removed: %d", deleted);
+                buffer_append_string(write_buf, "+OK\r\n");
+            }
+        }
+
+        // 3. Abilita la scrittura sul socket per inviare la risposta al client
+        el_enable_write(server->loop, job->client_fd, (void*)conn);
+
+cleanup:
+        // 4. Libera tutta la memoria del Job
+        if (job->text_to_embed) free(job->text_to_embed);
+        if (job->key_part_1) free(job->key_part_1);
+        if (job->key_part_2) free(job->key_part_2);
+        if (job->value) free(job->value);
+        if (job->vector_result) free(job->vector_result);
+        free(job);
+    }
 }

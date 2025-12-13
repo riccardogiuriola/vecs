@@ -1,6 +1,7 @@
 /*
  * Vecs Project: Vector Engine (Wrapper Llama.cpp)
  * (src/vector/vector_engine.c)
+ * VERSION: CPU-ONLY SAFE MODE + DEBUG LOGGING
  */
 
 #include "vector_engine.h"
@@ -12,56 +13,39 @@
 
 struct vector_engine_s {
     struct llama_model *model;
-    struct llama_context *ctx;
+    
+    struct llama_context **ctxs;    
+    struct llama_batch *batches;
+    int num_threads;
+    
     int n_embd;
-    struct llama_batch batch; 
     int batch_capacity;
-    int is_bert; // Flag per architettura encoder-only
+    int is_bert; 
 };
 
-vector_engine_t* vector_engine_init(const char *model_path) {
+vector_engine_t* vector_engine_init(const char *model_path, int num_threads) {
     llama_backend_init();
 
     struct llama_model_params model_params = llama_model_default_params();
-    // Ottimizzazione per Apple Silicon (M1/M2/M3)
-    model_params.n_gpu_layers = 99; 
+    model_params.n_gpu_layers = 0; 
 
-    // FIX WARNING: llama_load_model_from_file -> llama_model_load_from_file
     struct llama_model *model = llama_model_load_from_file(model_path, model_params);
     if (!model) {
         log_error("Fallito caricamento modello: %s", model_path);
         return NULL;
     }
 
-    struct llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = 2048; 
-    ctx_params.embeddings = true; // Necessario per estrarre vettori
-
-    // FIX WARNING: llama_new_context_with_model -> llama_init_from_model
-    struct llama_context *ctx = llama_init_from_model(model, ctx_params);
-    if (!ctx) {
-        log_error("Fallita creazione contesto llama");
-        // FIX WARNING: llama_free_model -> llama_model_free
-        llama_model_free(model);
-        return NULL;
-    }
-
-    vector_engine_t *engine = malloc(sizeof(vector_engine_t));
+    vector_engine_t *engine = calloc(1, sizeof(vector_engine_t));
     engine->model = model;
-    engine->ctx = ctx;
-    
-    // FIX WARNING: llama_n_embd -> llama_model_n_embd
     engine->n_embd = llama_model_n_embd(model); 
-    
+    engine->num_threads = num_threads;
     engine->batch_capacity = 2048;
-    engine->batch = llama_batch_init(engine->batch_capacity, 0, 1);
 
-    // --- Rilevamento Architettura ---
+    // --- Rilevamento Architettura (BERT vs Llama) ---
     engine->is_bert = 0;
     if (llama_model_has_encoder(model)) {
         engine->is_bert = 1;
     } else {
-        // Fallback: controllo stringa architettura
         char arch[128] = {0};
         if (llama_model_meta_val_str(model, "general.architecture", arch, sizeof(arch)) > 0) {
             if (strstr(arch, "bert") || strstr(arch, "nomic-bert") || strstr(arch, "roberta")) {
@@ -70,99 +54,132 @@ vector_engine_t* vector_engine_init(const char *model_path) {
         }
     }
 
-    log_info("Vector Engine Init: Dim=%d, Mode=%s", 
-             engine->n_embd, engine->is_bert ? "Encoder (BERT/BGE)" : "Decoder (Llama/GPT)");
+    // --- Allocazione Risorse Thread ---
+    engine->ctxs = calloc(num_threads, sizeof(struct llama_context*));
+    engine->batches = calloc(num_threads, sizeof(struct llama_batch));
+
+    // Configurazione Contesto (DEFINITA UNA VOLTA SOLA)
+    struct llama_context_params ctx_params = llama_context_default_params();
+    ctx_params.n_ctx = 2048; 
+    ctx_params.embeddings = true;
+
+    for (int i = 0; i < num_threads; i++) {
+        engine->ctxs[i] = llama_init_from_model(model, ctx_params);
+        if (!engine->ctxs[i]) {
+            log_fatal("Impossibile creare contesto llama per thread %d (OOM?)", i);
+            return NULL; 
+        }
+        engine->batches[i] = llama_batch_init(engine->batch_capacity, 0, 1);
+    }
+
+    log_info("Vector Engine Init: Dim=%d, Mode=%s, Threads=%d, Backend=CPU", 
+             engine->n_embd, 
+             engine->is_bert ? "Encoder (BERT/BGE)" : "Decoder (Llama/GPT)",
+             num_threads);
     
     return engine;
 }
 
 void vector_engine_destroy(vector_engine_t *engine) {
     if (!engine) return;
-    llama_batch_free(engine->batch);
-    if (engine->ctx) llama_free(engine->ctx);
-    // FIX WARNING: llama_free_model -> llama_model_free
+
+    for (int i = 0; i < engine->num_threads; i++) {
+        if (engine->batches) llama_batch_free(engine->batches[i]);
+        if (engine->ctxs && engine->ctxs[i]) llama_free(engine->ctxs[i]);
+    }
+
+    if (engine->batches) free(engine->batches);
+    if (engine->ctxs) free(engine->ctxs);
     if (engine->model) llama_model_free(engine->model);
-    free(engine);
+
     llama_backend_free();
+    free(engine);
 }
 
 int vector_engine_get_dim(vector_engine_t *engine) {
     return engine->n_embd;
 }
 
-int vector_engine_embed(vector_engine_t *engine, const char *text, float *out_vector) {
+int vector_engine_embed(vector_engine_t *engine, int thread_id, const char *text, float *out_vector) {
     if (!engine || !text || !out_vector) return -1;
+    if (thread_id < 0 || thread_id >= engine->num_threads) {
+        log_error("Invalid thread_id: %d", thread_id);
+        return -1;
+    }
+
+    struct llama_context *ctx = engine->ctxs[thread_id];
+    struct llama_batch *batch = &engine->batches[thread_id];
 
     // --- 1. Tokenizzazione ---
     const struct llama_vocab *vocab = llama_model_get_vocab(engine->model);
-    int n_tokens_alloc = strlen(text) + 2; 
+    int n_tokens_alloc = strlen(text) + 4; // Un po' di buffer extra
     llama_token *tokens = malloc(n_tokens_alloc * sizeof(llama_token));
     
-    // add_special = true è CRUCIALE per BGE/BERT (aggiunge il token CLS all'inizio)
+    // add_special=true per BERT/BGE
     int n_tokens = llama_tokenize(vocab, text, strlen(text), tokens, n_tokens_alloc, true, false);
 
     if (n_tokens < 0) {
+        // Resize buffer se serve
         n_tokens_alloc = -n_tokens;
         tokens = realloc(tokens, n_tokens_alloc * sizeof(llama_token));
         n_tokens = llama_tokenize(vocab, text, strlen(text), tokens, n_tokens_alloc, true, false);
     }
 
+    // DEBUG TOKENIZER: Qui era il fallimento silenzioso!
     if (n_tokens <= 0) {
+        log_error("Tokenizer failed for text: '%.20s...' (Len: %lu). Ret: %d", text, strlen(text), n_tokens);
         free(tokens);
         return -1;
     }
 
-    if (n_tokens > engine->batch_capacity) n_tokens = engine->batch_capacity;
+    if (n_tokens > engine->batch_capacity) {
+        log_warn("Truncating input: %d tokens > batch capacity %d", n_tokens, engine->batch_capacity);
+        n_tokens = engine->batch_capacity;
+    }
 
     // --- 2. Preparazione Batch ---
-    engine->batch.n_tokens = n_tokens;
+    // Importante: Reset del batch
+    batch->n_tokens = n_tokens;
     for (int i = 0; i < n_tokens; i++) {
-        engine->batch.token[i] = tokens[i];
-        engine->batch.pos[i] = i;
-        engine->batch.seq_id[i][0] = 0; // Sequenza 0
-        engine->batch.n_seq_id[i] = 1;
-        engine->batch.logits[i] = true; // Richiedi output per tutti (serve per il pooling)
+        batch->token[i] = tokens[i];
+        batch->pos[i] = i;
+        batch->seq_id[i][0] = 0;
+        batch->n_seq_id[i] = 1;
+        batch->logits[i] = true; 
     }
 
     // --- 3. Inferenza ---
-    
-    // Pulizia memoria KV (Nuova API llama.cpp)
-    llama_memory_t mem = llama_get_memory(engine->ctx);
+    llama_memory_t mem = llama_get_memory(ctx);
     llama_memory_seq_rm(mem, -1, -1, -1);
 
     int ret = 0;
     if (engine->is_bert) {
-        ret = llama_encode(engine->ctx, engine->batch);
+        ret = llama_encode(ctx, *batch);
     } else {
-        ret = llama_decode(engine->ctx, engine->batch);
+        ret = llama_decode(ctx, *batch);
     }
 
     if (ret != 0) {
-        log_error("Inference fallita: %d", ret);
+        log_error("Llama Inference Failed (Thread %d). Code: %d. Prompt: '%.10s...'", thread_id, ret, text);
         free(tokens);
         return -1;
     }
 
-    // --- 4. Estrazione Embedding (Auto-Pooling) ---
-    
-    // Proviamo a usare la funzione di alto livello che rispetta il pooling_type del modello (CLS vs Mean)
-    float *emb = llama_get_embeddings_seq(engine->ctx, 0);
+    // --- 4. Estrazione Embedding ---
+    float *emb = llama_get_embeddings_seq(ctx, 0);
     
     if (emb) {
-        // Copia diretta dal buffer gestito da llama.cpp
         memcpy(out_vector, emb, engine->n_embd * sizeof(float));
     } else {
-        // Fallback Manuale (Se il pooling non è definito nel modello)
+        // Fallback Manual Pooling
         if (engine->is_bert) {
-            // CLS Pooling (Token 0)
-            float *cls = llama_get_embeddings_ith(engine->ctx, 0);
+            float *cls = llama_get_embeddings_ith(ctx, 0);
             if (cls) memcpy(out_vector, cls, engine->n_embd * sizeof(float));
         } else {
-            // Mean Pooling
             memset(out_vector, 0, engine->n_embd * sizeof(float));
             int count = 0;
             for (int i = 0; i < n_tokens; i++) {
-                float *t = llama_get_embeddings_ith(engine->ctx, i);
+                float *t = llama_get_embeddings_ith(ctx, i);
                 if (t) {
                     for (int j = 0; j < engine->n_embd; j++) out_vector[j] += t[j];
                     count++;
@@ -174,7 +191,7 @@ int vector_engine_embed(vector_engine_t *engine, const char *text, float *out_ve
         }
     }
 
-    // --- 5. Normalizzazione Euclidea ---
+    // --- 5. Normalizzazione ---
     float norm = 0.0f;
     for (int i = 0; i < engine->n_embd; i++) norm += out_vector[i] * out_vector[i];
     norm = sqrtf(norm);
