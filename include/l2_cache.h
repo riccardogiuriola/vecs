@@ -20,4 +20,7 @@ const char *l2_cache_search(l2_cache_t *cache, const float *query_vector, const 
 // Rimuove un elemento semanticamente equivalente
 int l2_cache_delete_semantic(l2_cache_t *cache, const float *query_vector);
 
+// Svuota cache l2
+void l2_cache_clear(l2_cache_t *cache);
+
 #endif // VECS_L2_CACHE_H

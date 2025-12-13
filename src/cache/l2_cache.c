@@ -203,3 +203,15 @@ int l2_cache_delete_semantic(l2_cache_t* cache, const float* query_vector) {
 
     return 0; // Non trovato
 }
+
+void l2_cache_clear(l2_cache_t *cache) {
+    if (!cache) return;
+
+    for (size_t i = 0; i < cache->size; i++) {
+        free(cache->entries[i].vector);
+        free(cache->entries[i].original_prompt);
+        free(cache->entries[i].response);
+    }
+    cache->size = 0;
+    log_debug("L2 Cache svuotata.");
+}

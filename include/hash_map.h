@@ -61,4 +61,10 @@ const char *hash_map_get(hash_map_t *map, const char *key);
  */
 void hash_map_delete(hash_map_t *map, const char *key);
 
+/**
+ * @brief Svuota la cache.
+ * * @param map La mappa.
+ */
+void hash_map_clear(hash_map_t *map);
+
 #endif // VECS_HASH_MAP_H

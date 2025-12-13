@@ -365,6 +365,16 @@ static void server_execute_command(vecs_connection_t *conn, int argc, char **arg
             
             log_info("DELETE eseguito per '%s' (L2 rimossi: %d)", argv[1], deleted_count);
         }
+    } else if (strcasecmp(argv[0], "FLUSH") == 0) {
+        // Svuota L1
+        hash_map_clear(l1_cache);
+        
+        // Svuota L2
+        l2_cache_clear(server->l2_cache);
+        
+        log_info("FLUSH COMMAND: Cache L1 e L2 svuotate completamente.");
+        buffer_append_string(write_buf, "+OK\r\n");
+
     } else {
         snprintf(header_buf, sizeof(header_buf), "-ERR unknown command '%s'\r\n", argv[0]);
         buffer_append_string(write_buf, header_buf);

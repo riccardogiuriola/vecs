@@ -239,3 +239,19 @@ void hash_map_delete(hash_map_t *map, const char *key) {
     }
     // Chiave non trovata, non fa nulla
 }
+
+void hash_map_clear(hash_map_t *map) {
+    if (!map) return;
+
+    for (size_t i = 0; i < map->capacity; i++) {
+        hm_node_t *node = map->buckets[i];
+        while (node) {
+            hm_node_t *next = node->next;
+            hm_node_destroy(node);
+            node = next;
+        }
+        map->buckets[i] = NULL;
+    }
+    map->size = 0;
+    log_debug("L1 Cache svuotata.");
+}
