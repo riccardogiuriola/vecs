@@ -535,9 +535,10 @@ vecs_server_t* server_create(const char *port) {
 
     // Crea pool con 4 worker (o pari a nproc)
     server->worker_pool = wp_create(server, num_workers, queue_limit);
-    // Aggiungi la PIPE di notifica all'Event Loop
+    
+    // Aggiungi la PIPE di notifica all'Event Loop usando worker_pool come ID, non server.
     int notify_fd = wp_get_notify_fd(server->worker_pool);
-    if (el_add_fd_read(server->loop, notify_fd, (void*)server) == -1) { // Nota: udata è server per distinguerlo
+    if (el_add_fd_read(server->loop, notify_fd, (void*)server->worker_pool) == -1) { 
         log_fatal("Impossibile aggiungere notify_fd al loop");
     }
 
@@ -561,6 +562,7 @@ vecs_server_t* server_create(const char *port) {
         return NULL;
     }
 
+    // Qui usiamo (void*)server come ID del listener
     if (el_add_fd_read(server->loop, server->listen_fd, (void*)server) == -1) {
         log_fatal("Impossibile aggiungere listener al loop.");
         return NULL;
@@ -618,12 +620,18 @@ int server_run(vecs_server_t *server) {
 
             int notify_fd = wp_get_notify_fd(server->worker_pool);
             
-            if (event->fd == server->listen_fd) {
-             server_handle_new_connection(server);
+            // Su Linux, event->fd è -1 quando usiamo udata. 
+            // Dobbiamo identificare l'evento tramite udata.
+            
+            // Caso 1: Nuova Connessione (udata == server)
+            if (event->fd == server->listen_fd || event->udata == (void*)server) {
+                server_handle_new_connection(server);
             } 
-            else if (event->fd == notify_fd) {
+            // Caso 2: Notifica Worker (udata == worker_pool)
+            else if (event->fd == notify_fd || event->udata == (void*)server->worker_pool) {
                 server_handle_worker_notification(server);
             }
+            // Caso 3: Evento Client (udata == vecs_connection_t*)
             else {
                 server_handle_client_event(event);
             }
