@@ -5,6 +5,7 @@
 #include <math.h>
 #include <ctype.h>
 #include <time.h>
+#include <stdint.h>
 
 typedef struct {
     float* vector;

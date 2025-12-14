@@ -128,12 +128,19 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
 # Target per compilare Llama.cpp
+# Target libs
 libs:
-	@echo "Compiling Llama.cpp with CMake..."
-	@echo "Options: $(CMAKE_ARGS)"
+	@echo "Compiling Llama.cpp..."
 	@mkdir -p $(LLAMA_BUILD)
-	cd $(LLAMA_ROOT) && cmake -B build $(CMAKE_ARGS) \
-		&& cmake --build build --config Release -j$(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
+	cd $(LLAMA_ROOT) && cmake -B build \
+		-DBUILD_SHARED_LIBS=OFF \
+		-DLLAMA_BUILD_EXAMPLES=OFF \
+		-DLLAMA_BUILD_TESTS=OFF \
+		-DLLAMA_BUILD_SERVER=OFF \
+		-DLLAMA_CURL=OFF \
+		-DGGML_NATIVE=OFF \
+		-DGGML_OPENMP=OFF \
+		&& cmake --build build --config Release --target llama -j4
 
 clean:
 	@echo "CLEAN Objects"
