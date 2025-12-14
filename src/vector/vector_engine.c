@@ -121,14 +121,14 @@ vector_engine_t* vector_engine_init(vecs_engine_config_t *config) {
         ctx_params.n_batch = max_batch_tokens; 
         
         // --- LIMITE DINAMICO SEQUENZE ---
-        #ifdef __APPLE__
-            // Metal backend ha un limite hardcoded di 256 sequenze in alcune versioni
+        #if defined(__APPLE__) || defined(__aarch64__)
+            // Su ARM64/Metal spesso il limite hardware o della lib è più basso per i batch
             engine->gpu_max_seq = 256;
-            log_info("Platform: macOS/Metal detected. Setting Max Seq = 256.");
+            log_info("Platform: ARM64/Metal detected. Setting Max Seq = 256.");
         #else
-            // Linux/CUDA
+            // Linux x86_64 (Intel/AMD) con GPU NVIDIA di solito supporta batch enormi
             engine->gpu_max_seq = max_batch_tokens;
-            log_info("Platform: Generic/Linux. Setting Max Seq = %d.", max_batch_tokens);
+            log_info("Platform: x86_64/CUDA. Setting Max Seq = %d.", max_batch_tokens);
         #endif
 
         ctx_params.n_seq_max = engine->gpu_max_seq;
