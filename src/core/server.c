@@ -507,11 +507,26 @@ vecs_server_t* server_create(const char *port) {
         return NULL;
     }
 
+    vecs_engine_config_t eng_conf = {0};
+    eng_conf.model_path = server->config.model_path;
+    eng_conf.num_threads = server->config.num_workers;
+
+    const char *mode_env = getenv("VECS_EXECUTION_MODE");
+    if (mode_env && strcasecmp(mode_env, "gpu") == 0) {
+        eng_conf.mode = VECS_MODE_GPU;
+        eng_conf.gpu_layers = get_env_int("VECS_GPU_LAYERS", "99"); // Default offload tutto
+        log_info("Mode: GPU Acceleration Enabled (Layers: %d)", eng_conf.gpu_layers);
+    } else {
+        eng_conf.mode = VECS_MODE_CPU;
+        eng_conf.gpu_layers = 0;
+        log_info("Mode: CPU Optimized");
+    }
+
     // 3. AI Vector Engine
     log_info("Caricamento modello AI...");
     int num_workers = server->config.num_workers;
     int queue_limit = 1000;
-    server->vec_engine = vector_engine_init(server->config.model_path, num_workers);
+    server->vec_engine = vector_engine_init(&eng_conf);
     if (!server->vec_engine) {
         log_fatal("ERRORE CRITICO: Impossibile caricare il modello GGUF da '%s'.", server->config.model_path);
         // Clean up parziale...

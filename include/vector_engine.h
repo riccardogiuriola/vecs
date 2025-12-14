@@ -5,8 +5,20 @@
 
 typedef struct vector_engine_s vector_engine_t;
 
+typedef enum {
+    VECS_MODE_CPU,
+    VECS_MODE_GPU
+} vecs_execution_mode_t;
+
+typedef struct {
+    const char *model_path;
+    int num_threads;         // Per CPU: numero contesti. Per GPU: ignorato (o usato per preprocessing).
+    vecs_execution_mode_t mode; 
+    int gpu_layers;          // 0 = CPU, 99 = Full GPU
+} vecs_engine_config_t;
+
 // Inizializza il modello (percorso file .gguf)
-vector_engine_t *vector_engine_init(const char *model_path, int num_threads);
+vector_engine_t *vector_engine_init(vecs_engine_config_t *config);
 
 // Libera risorse
 void vector_engine_destroy(vector_engine_t *engine);
