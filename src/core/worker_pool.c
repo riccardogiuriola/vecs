@@ -51,7 +51,7 @@ static void *worker_routine(void *arg) {
     int my_id = w_arg->thread_id;
     free(w_arg);
 
-    log_debug("Worker %d: Thread avviato.", my_id);
+    //log_debug("Worker %d: Thread avviato.", my_id);
 
     while (1) {
         bg_job_t *job = NULL;
@@ -80,7 +80,7 @@ static void *worker_routine(void *arg) {
         
         vector_engine_t *engine = server_get_engine(pool->server);
         
-        // --- FIX: ALLOCAZIONE MEMORIA VETTORE ---
+        // ALLOCAZIONE MEMORIA VETTORE ---
         int dim = vector_engine_get_dim(engine);
         job->vector_result = malloc(dim * sizeof(float));
         

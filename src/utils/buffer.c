@@ -1,9 +1,6 @@
 /*
  * Vecs Project: Implementazione Buffer Dinamico
  * (src/utils/buffer.c)
- *
- * --- AGGIORNATO (Fase 3/Fix) ---
- * Aggiunte funzioni di I/O e helper.
  */
 
 #include "buffer.h"

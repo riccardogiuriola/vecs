@@ -1,7 +1,6 @@
 /*
  * Vecs Project: Vector Engine (Wrapper Llama.cpp)
  * (src/vector/vector_engine.c)
- * VERSION: STABILITY FIX (Race Condition Prevention)
  */
 
 #include "vector_engine.h"
@@ -62,15 +61,31 @@ static int embed_cpu(vector_engine_t *engine, int thread_id, const char *text, f
 static int embed_gpu(vector_engine_t *engine, const char *text, float *out);
 static void str_tolower(char *str);
 static vecs_pooling_type_t detect_pooling_strategy(struct llama_model *model);
+static void vecs_llama_log_callback(enum ggml_log_level level, const char *text, void *user_data);
 
 // --- HELPER ---
 static void str_tolower(char *str) {
     for(; *str; ++str) *str = tolower(*str);
 }
 
+static void vecs_llama_log_callback(enum ggml_log_level level, const char *text, void *user_data) {
+    (void)user_data;
+    // Sopprimi tutto tranne errori gravi
+    if (level == GGML_LOG_LEVEL_ERROR) {
+        // Rimuoviamo il newline finale se presente perché il nostro logger lo aggiunge
+        char buf[1024];
+        strncpy(buf, text, 1023);
+        size_t len = strlen(buf);
+        if (len > 0 && buf[len-1] == '\n') buf[len-1] = '\0';
+        
+        log_error("[LLAMA] %s", buf);
+    }
+}
+
 // --- INIT ---
 
 vector_engine_t* vector_engine_init(vecs_engine_config_t *config) {
+    llama_log_set(vecs_llama_log_callback, NULL);
     llama_backend_init();
 
     struct llama_model_params model_params = llama_model_default_params();
@@ -406,7 +421,7 @@ static void* gpu_scheduler_loop(void *arg) {
                     log_error("GPU Inference Failed (ret=%d)", ret);
                 }
 
-                // 4. Distribuzione Risultati (FIX SEGFAULT QUI)
+                // 4. Distribuzione Risultati
                 gpu_request_t *notify_cursor = batch_start;
                 int current_seq = 0;
 

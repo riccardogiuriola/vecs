@@ -739,7 +739,7 @@ static void server_load_data(vecs_server_t *server) {
     char magic[7] = {0};
     fread(magic, 1, 6, f);
     if (strcmp(magic, "VECS01") != 0) {
-        log_error("Header file dump non valido o versione errata.");
+        log_warn("Header file dump non valido o versione errata.");
         fclose(f);
         return;
     }
