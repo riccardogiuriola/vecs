@@ -60,7 +60,6 @@ ifeq ($(OS),Linux)
         CMAKE_ARGS += -DGGML_CUDA=ON
         
         # Linker flags per CUDA (Assumiamo path standard, aggiusta se necessario)
-        # Necessario linkare il runtime CUDA staticamente o dinamicamente
         LDFLAGS_PLATFORM += -L/usr/local/cuda/lib64 -lcudart -lcublas -lculibos
         CFLAGS += -DVecs_USE_GPU
     else
@@ -72,7 +71,7 @@ ifeq ($(OS),Linux)
 endif
 
 # --- LOGICA LINKER (Trova tutte le .a generate da llama.cpp) ---
-NODEPS := clean libs re
+NODEPS := clean clean-libs libs re
 
 ifeq (0, $(words $(findstring $(MAKECMDGOALS), $(NODEPS))))
     RAW_LIBS = $(shell find $(LLAMA_BUILD) -name "*.a" 2>/dev/null)
@@ -111,9 +110,10 @@ SRCS = $(COMMON_SRCS) $(PLATFORM_SRC)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SRCS))
 
 # --- TARGETS ---
-.PHONY: all clean re libs dir_guard
+# Aggiunto 'cli' ai phony e ad 'all'
+.PHONY: all clean clean-libs re libs dir_guard cli
 
-all: dir_guard $(TARGET)
+all: dir_guard $(TARGET) cli
 
 dir_guard:
 	@mkdir -p $(OBJ_DIR)
@@ -127,7 +127,11 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@echo "CC   $<"
 	@$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
 
-# Target per compilare Llama.cpp
+# --- NUOVO TARGET CLI ---
+cli:
+	@echo "MAKE vecs-cli"
+	@$(MAKE) -C vecs-cli
+
 # Target libs
 libs:
 	@echo "Compiling Llama.cpp..."
@@ -145,6 +149,8 @@ libs:
 clean:
 	@echo "CLEAN Objects"
 	@rm -rf $(OBJ_DIR) $(TARGET)
+	@echo "CLEAN vecs-cli"
+	@$(MAKE) -C vecs-cli clean
 
 clean-libs:
 	@echo "CLEAN Llama.cpp"
