@@ -158,7 +158,9 @@ vector_engine_t* vector_engine_init(vecs_engine_config_t *config) {
         engine->gpu_batch_capacity = max_batch_tokens;
 
         ctx_params.n_ctx = max_batch_tokens;
-        ctx_params.n_batch = max_batch_tokens; 
+        ctx_params.n_batch = max_batch_tokens;
+
+        ctx_params.n_ubatch = max_batch_tokens;
         
         // --- LIMITE DINAMICO SEQUENZE ---
         #if defined(__APPLE__) || defined(__aarch64__)

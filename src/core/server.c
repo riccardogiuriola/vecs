@@ -28,7 +28,7 @@
 // Configurazioni Statiche
 #define MAX_FD 65536
 #define MAX_EVENTS 64
-#define VECS_BACKLOG 128
+#define VECS_BACKLOG 1024
 #define MAX_L1_KEY_SIZE 8192
 
 // --- DEFAULTS (Fallback se ENV non settate) ---
