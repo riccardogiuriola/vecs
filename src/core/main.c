@@ -6,10 +6,27 @@
 #include "server.h"
 #include "logger.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 #define DEFAULT_PORT "6380"
 
+const char *VECS_BANNER =
+    "\033[1;36m"
+    "  _    _  ______  _____  _____\n"
+    " | |  | ||  ____|/ ____|/ ____|\n"
+    " | |  | || |__  | |    | (___  \n"
+    " | |  | ||  __| | |     \\___ \\ \n"
+    " | |__| || |____| |____ ____) |\n"
+    "  \\____/ |______|\\_____|_____/ \n"
+    "\033[0m"
+    "  Semantic Cache Proxy - v1.7.3\n\n";
+
+void print_banner() {
+    printf("%s", VECS_BANNER);
+}
+
 int main(void) {
+    print_banner();
     // Imposta il livello di log
     logger_set_level(LOG_DEBUG);
 
