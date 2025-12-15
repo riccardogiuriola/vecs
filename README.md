@@ -81,7 +81,7 @@ graph TD
 Clone recursively to include the inference engine (`llama.cpp`).
 
 ```
-git clone --recursive https://github.com/riccardogiuriola/vecs-client-node
+git clone --recursive https://github.com/riccardogiuriola/vecs
 cd vecs
 
 ```
@@ -94,7 +94,7 @@ Vecs requires a GGUF embedding model. We recommend **BGE-M3** (high accuracy) or
 mkdir -p models
 
 # Download BGE-M3 (Quantized 4-bit)
-curl -L -o models/bge-m3-q4_k_m.gguf https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q4_K_M.gguf
+curl -L -o models/default_model.gguf https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q4_K_M.gguf
 
 ```
 
@@ -118,7 +118,7 @@ make
 
 ```
 
-_Server listening on port 6379..._
+_Server listening on port 6380..._
 
 ## 🐳 Installation (Docker)
 
@@ -131,7 +131,7 @@ This downloads the default model automatically inside the container.
 ```
 docker run -d\
   --name vecs\
-  -p 6379:6379\
+  -p 6380:6380\
   vecs:latest
 
 ```
@@ -143,11 +143,12 @@ You can tune thresholds and capacity using Environment Variables.
 ```
 docker run -d\
   --name vecs\
-  -p 6379:6379\
-  -e VECS_L2_THRESHOLD="0.75"\
-  -e VECS_L2_DEDUPE_THRESHOLD="0.95"\
-  -e VECS_L2_CAPACITY="10000"\
-  vecs:latest
+  -p 6380:6380\
+  -e VECS_L2_THRESHOLD="0.75" \
+  -e VECS_L2_DEDUPE_THRESHOLD="0.95" \
+  -e VECS_L2_CAPACITY="10000" \
+  -e VECS_TTL_DEFAULT="86400" \
+  riccardogiuriola/vecs:latest
 
 ```
 
@@ -158,17 +159,27 @@ Create a `docker-compose.yml`:
 ```
 services:
   vecs:
-    image: vecs:latest
+    image: riccardogiuriola/vecs:latest
     build: .
     ports:
-      - "6379:6379"
+      - "6380:6380"
     environment:
+      # Soglia minima di somiglianza per considerare una query come HIT (0.0 - 1.0)
       - VECS_L2_THRESHOLD=0.65
+      # Capacità massima di vettori da mantenere in RAM
       - VECS_L2_CAPACITY=5000
-    # Uncomment to use custom models
-    # volumes:
-    #   - ./my_models:/app/custom_models
-
+      # Soglia per evitare di salvare risposte già esistenti (Deduplication)
+      - VECS_L2_DEDUPE_THRESHOLD=0.95
+      # TTL di default per le nuove voci in secondi (es. 2 ore)
+      - VECS_TTL_DEFAULT=7200
+      # Percorso del modello GGUF (se non si usa quello di default)
+      # - VECS_MODEL_PATH=/app/models/my_model.gguf
+    volumes:
+      - ./models:/app/models
+      - vecs_data:/app/data
+volumes:
+  vecs_data:
+    driver: local
 ```
 
 ## ⚙️ Configuration (Environment Variables)
@@ -180,7 +191,7 @@ services:
 | `VECS_L2_DEDUPE_THRESHOLD` | `0.95`             | If a new entry is > 95% similar to an existing one, it is NOT saved (Deduplication).     |
 | `VECS_L2_CAPACITY`         | `5000`             | Maximum number of vectors to keep in RAM.                                                |
 | `VECS_TTL_DEFAULT`         | `3600`             | Default Time-To-Live in seconds (1 hour) for entries without explicit TTL.               |
-| `PORT`.                    | `6379`             | Listening port.                                                                          |
+| `PORT`.                    | `6380`             | Listening port.                                                                          |
 
 ## 📡 API Protocol (VSP)
 
@@ -210,6 +221,22 @@ Removes exact match from L1 and semantically similar vectors from L2.
 DELETE <Prompt> <Metadata_JSON>
 ```
 
+### FLUSH (Clear Cache)
+
+Clear the entire server cache.
+
+```
+FLUSH
+```
+
+### SAVE (Save to disk)
+
+Manual save of cache to disk
+
+```
+SAVE
+```
+
 ## 💻 Client Libraries
 
 ### Node.js / TypeScript
@@ -224,7 +251,7 @@ npm install vecs-client
 ```
 import { VecsClient } from 'vecs-client';
 
-const client = new VecsClient({ host: 'localhost', port: 6379 });
+const client = new VecsClient({ host: 'localhost', port: 6380 });
 await client.connect();
 
 // Store
