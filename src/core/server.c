@@ -16,6 +16,7 @@
 #include "l2_cache.h"
 #include "text.h"
 #include "worker_pool.h"
+#include "sys_info.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 
 // Configurazioni Statiche
 #define MAX_FD 65536
@@ -561,16 +563,30 @@ vecs_server_t* server_create(const char *port) {
     eng_conf.model_path = server->config.model_path;
     eng_conf.num_threads = server->config.num_workers;
 
+    char cpu_buf[128];
+    char ram_buf[64];
+    char gpu_buf[128];
+
     const char *mode_env = getenv("VECS_EXECUTION_MODE");
+    log_info("== HARDWARE CONFIG ==");
     if (mode_env && strcasecmp(mode_env, "gpu") == 0) {
         eng_conf.mode = VECS_MODE_GPU;
-        eng_conf.gpu_layers = get_env_int("VECS_GPU_LAYERS", "99"); // Default offload tutto
+        eng_conf.gpu_layers = get_env_int("VECS_GPU_LAYERS", "99");
+        sys_get_gpu_info(gpu_buf, sizeof(gpu_buf));
+        
         log_info("Mode: GPU Acceleration Enabled (Layers: %d)", eng_conf.gpu_layers);
+        log_info("Hardware: %s", gpu_buf);
     } else {
         eng_conf.mode = VECS_MODE_CPU;
         eng_conf.gpu_layers = 0;
+        // Helper CPU/RAM
+        sys_get_cpu_model(cpu_buf, sizeof(cpu_buf));
+        sys_get_memory_info(ram_buf, sizeof(ram_buf));
+        
         log_info("Mode: CPU Optimized");
+        log_info("Hardware: %s | System RAM: %s", cpu_buf, ram_buf);
     }
+    log_info("==================");
 
     const char *pool_env = getenv("VECS_POOLING");
     eng_conf.pooling = POOLING_UNSPECIFIED; // Default sicuro
