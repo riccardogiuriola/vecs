@@ -45,26 +45,7 @@ It acts as a middleware between your user and your LLM (e.g., GPT-4, Claude, Lla
 🤖 **Model Support:**
 Vecs automatically detects the model architecture (Encoder-only vs Decoder) to use the correct inference method. It is optimized for modern embedding models like **BGE-M3**, **E5**, and **Nomic-Embed**.
 
-```
-graph TD
-    Client[Client App] -->|QUERY| Server[Vecs Server]
-
-    subgraph "Vecs Core"
-        L1{L1 Exact?}
-        AI[Vector Engine (llama.cpp)]
-        L2{L2 Semantic?}
-        Store[(Vector Store)]
-    end
-
-    Server --> L1
-    L1 -->|Yes| HitL1[Return Cached Response]
-    L1 -->|No| AI
-
-    AI -->|Generate Embedding| L2
-    L2 -->|Similarity > Threshold| HitL2[Return Cached Response]
-    L2 -->|No Match| Miss[Return MISS]
-
-```
+![VECS Architecture Diagram](docs/architecture.svg)
 
 ## 📦 Installation (Native)
 
