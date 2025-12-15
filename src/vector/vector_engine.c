@@ -53,6 +53,7 @@ struct vector_engine_s {
     gpu_request_t *queue_tail;
     pthread_mutex_t queue_lock;
     pthread_cond_t queue_cond;
+    vecs_pooling_type_t pooling;
 };
 
 // --- PROTOTIPI ---
@@ -60,6 +61,7 @@ static void* gpu_scheduler_loop(void *arg);
 static int embed_cpu(vector_engine_t *engine, int thread_id, const char *text, float *out);
 static int embed_gpu(vector_engine_t *engine, const char *text, float *out);
 static void str_tolower(char *str);
+static vecs_pooling_type_t detect_pooling_strategy(struct llama_model *model);
 
 // --- HELPER ---
 static void str_tolower(char *str) {
@@ -85,6 +87,22 @@ vector_engine_t* vector_engine_init(vecs_engine_config_t *config) {
     engine->n_embd = llama_model_n_embd(model);
     engine->mode = config->mode;
 
+    if (config->pooling != POOLING_UNSPECIFIED) {
+        engine->pooling = config->pooling;
+        log_info("Pooling Strategy: %d (Forzata da Config)", engine->pooling);
+    } 
+    // 2. Fallback: Auto-detection dai metadati GGUF
+    else {
+        engine->pooling = detect_pooling_strategy(model);
+        
+        const char *strategy_str = "UNKNOWN";
+        if (engine->pooling == POOLING_MEAN) strategy_str = "MEAN (Auto)";
+        else if (engine->pooling == POOLING_CLS) strategy_str = "CLS (Auto)";
+        else if (engine->pooling == POOLING_LAST) strategy_str = "LAST (Auto)";
+        
+        log_info("Pooling Strategy: %s", strategy_str);
+    }
+
     // --- RILEVAMENTO BERT ---
     engine->is_bert = (llama_model_has_encoder(model) != 0); 
     if (!engine->is_bert) {
@@ -95,6 +113,13 @@ vector_engine_t* vector_engine_init(vecs_engine_config_t *config) {
             engine->is_bert = 1;
             log_warn("Rilevato BGE/BERT dal nome file.");
         }
+    }
+
+    if (config->pooling == POOLING_UNSPECIFIED) {
+        if (engine->is_bert) engine->pooling = POOLING_CLS;
+        else engine->pooling = POOLING_LAST; // Default per Llama/Mistral
+    } else {
+        engine->pooling = config->pooling;
     }
 
     struct llama_context_params ctx_params = llama_context_default_params();
@@ -350,7 +375,11 @@ static void* gpu_scheduler_loop(void *arg) {
                     engine->gpu_batch.pos[pos] = i;
                     engine->gpu_batch.n_seq_id[pos] = 1;
                     engine->gpu_batch.seq_id[pos][0] = seq_id;
-                    engine->gpu_batch.logits[pos] = (i == cursor->n_tokens - 1);
+                    if (engine->pooling == POOLING_MEAN) {
+                        engine->gpu_batch.logits[pos] = 1; 
+                    } else {
+                        engine->gpu_batch.logits[pos] = (i == cursor->n_tokens - 1);
+                    }
                     engine->gpu_batch.n_tokens++;
                 }
                 
@@ -380,31 +409,59 @@ static void* gpu_scheduler_loop(void *arg) {
                 // 4. Distribuzione Risultati (FIX SEGFAULT QUI)
                 gpu_request_t *notify_cursor = batch_start;
                 int current_seq = 0;
-                
+
+                int batch_offset = 0;
                 while (notify_cursor) {
-                    // --- FIX CRITICO PER SEGFAULT ---
-                    // Salviamo il puntatore 'next' PRIMA di svegliare il worker.
-                    // Appena svegliamo il worker (pthread_cond_signal + unlock),
-                    // il worker potrebbe uscire e distruggere la struct 'notify_cursor'.
                     gpu_request_t *safe_next = notify_cursor->next;
                     int is_last_in_batch = (notify_cursor == batch_end);
 
                     pthread_mutex_lock(&notify_cursor->mutex);
                     
                     if (ret == 0) {
-                        float *emb = NULL;
-                        emb = llama_get_embeddings_seq(engine->gpu_ctx, current_seq);
-                        
-                        if (!emb && engine->is_bert) {
-                             emb = llama_get_embeddings_ith(engine->gpu_ctx, current_seq);
+                        // Pulisci il vettore destinazione (importante per la somma)
+                        memset(notify_cursor->output_dest, 0, engine->n_embd * sizeof(float));
+                        int success = 0;
+
+                        if (engine->pooling == POOLING_MEAN) {
+                            // --- MEAN POOLING IMPLEMENTATION ---
+                            // Iteriamo su tutti i token della richiesta corrente
+                            for (int k = 0; k < notify_cursor->n_tokens; k++) {
+                                // llama_get_embeddings_ith recupera l'i-esimo embedding NEL BATCH
+                                float *emb = llama_get_embeddings_ith(engine->gpu_ctx, batch_offset + k);
+                                
+                                if (emb) {
+                                    // Somma vettoriale
+                                    for (int j = 0; j < engine->n_embd; j++) {
+                                        notify_cursor->output_dest[j] += emb[j];
+                                    }
+                                    success = 1;
+                                }
+                            }
+                            // NOTA: Non serve dividere per N se poi normalizziamo (L2 Norm),
+                            // perché la direzione del vettore non cambia.
+                        } 
+                        else {
+                            // --- LAST / CLS POOLING (Legacy/Standard) ---
+                            // Usiamo _seq che è più sicuro per recuperare l'ultimo token valido
+                            float *emb = llama_get_embeddings_seq(engine->gpu_ctx, current_seq);
+                            if (!emb && engine->is_bert) {
+                                emb = llama_get_embeddings_ith(engine->gpu_ctx, batch_offset + notify_cursor->n_tokens - 1);
+                            }
+                            
+                            if (emb) {
+                                memcpy(notify_cursor->output_dest, emb, engine->n_embd * sizeof(float));
+                                success = 1;
+                            }
                         }
 
-                        if (emb) {
-                            memcpy(notify_cursor->output_dest, emb, engine->n_embd * sizeof(float));
+                        if (success) {
+                            // NORMALIZZAZIONE COMUNE (Cruciale per Cosine Similarity)
                             float norm = 0.0f;
-                            for(int k=0; k<engine->n_embd; k++) norm += emb[k]*emb[k];
+                            for(int k=0; k<engine->n_embd; k++) norm += notify_cursor->output_dest[k] * notify_cursor->output_dest[k];
                             norm = sqrtf(norm);
-                            if(norm > 1e-9) for(int k=0; k<engine->n_embd; k++) notify_cursor->output_dest[k] /= norm;
+                            if(norm > 1e-9) {
+                                for(int k=0; k<engine->n_embd; k++) notify_cursor->output_dest[k] /= norm;
+                            }
                             notify_cursor->success = 1;
                         } else {
                             notify_cursor->success = 0;
@@ -415,15 +472,70 @@ static void* gpu_scheduler_loop(void *arg) {
                     
                     notify_cursor->done = 1;
                     pthread_cond_signal(&notify_cursor->cond);
-                    pthread_mutex_unlock(&notify_cursor->mutex); // <-- Worker si sveglia qui
+                    pthread_mutex_unlock(&notify_cursor->mutex);
 
-                    // Da qui in poi, NON toccare più 'notify_cursor'
-                    if (is_last_in_batch) break;
-                    notify_cursor = safe_next; // Usiamo il puntatore salvato
+                    // Aggiorna gli indici per il prossimo giro
+                    batch_offset += notify_cursor->n_tokens; // Avanza l'offset nel batch piatto
                     current_seq++;
+                    
+                    if (is_last_in_batch) break;
+                    notify_cursor = safe_next;
                 }
             }
         }
     }
     return NULL;
+}
+
+static vecs_pooling_type_t detect_pooling_strategy(struct llama_model *model) {
+    char val_buf[1024]; // Buffer per il VALORE
+    char key_buf[256];  // Buffer per la CHIAVE (aggiunto questo)
+    
+    int count = llama_model_meta_count(model);
+    
+    for (int i = 0; i < count; i++) {
+        // --- CORREZIONE QUI ---
+        // Passiamo il buffer key_buf e la sua dimensione
+        int32_t key_len = llama_model_meta_key_by_index(model, i, key_buf, sizeof(key_buf));
+        
+        if (key_len < 0) continue; // Errore o fine
+        
+        // Controlliamo il nome del modello (general.name)
+        if (strcmp(key_buf, "general.name") == 0) {
+            // Leggiamo il valore associato a questa chiave
+            llama_model_meta_val_str_by_index(model, i, val_buf, sizeof(val_buf));
+            str_tolower(val_buf); // Convertiamo in minuscolo per controlli facili
+
+            log_debug("Auto-Detect Pooling: Modello rilevato '%s'", val_buf);
+
+            // --- REGOLE EURISTICHE ---
+            
+            // NOMIC: Usa sempre Mean Pooling
+            if (strstr(val_buf, "nomic")) {
+                log_info("Auto-Detect: Rilevato modello Nomic -> Force MEAN Pooling");
+                return POOLING_MEAN;
+            }
+
+            // E5 (Originale): Usa Mean Pooling
+            if (strstr(val_buf, "e5") && !strstr(val_buf, "mistral")) {
+                 log_info("Auto-Detect: Rilevato modello E5 Base -> Force MEAN Pooling");
+                 return POOLING_MEAN;
+            }
+
+            // JINA: Spesso Mean Pooling
+            if (strstr(val_buf, "jina")) {
+                log_info("Auto-Detect: Rilevato modello Jina -> Force MEAN Pooling");
+                return POOLING_MEAN;
+            }
+        }
+    }
+
+    // Default per architetture note
+    if (llama_model_has_encoder(model)) {
+        // BERT, BGE, ecc -> CLS
+        return POOLING_CLS;
+    }
+
+    // Default per Decoder (Llama, Mistral, Qwen) -> LAST TOKEN
+    return POOLING_LAST;
 }

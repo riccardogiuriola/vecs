@@ -522,6 +522,16 @@ vecs_server_t* server_create(const char *port) {
         log_info("Mode: CPU Optimized");
     }
 
+    const char *pool_env = getenv("VECS_POOLING");
+    eng_conf.pooling = POOLING_UNSPECIFIED; // Default sicuro
+
+    if (pool_env) {
+        if (strcasecmp(pool_env, "mean") == 0) eng_conf.pooling = POOLING_MEAN;
+        else if (strcasecmp(pool_env, "last") == 0) eng_conf.pooling = POOLING_LAST;
+        else if (strcasecmp(pool_env, "cls") == 0) eng_conf.pooling = POOLING_CLS;
+    }
+    log_info("Pooling Strategy: %s", pool_env ? pool_env : "AUTO");
+
     // 3. AI Vector Engine
     log_info("Caricamento modello AI...");
     int num_workers = server->config.num_workers;

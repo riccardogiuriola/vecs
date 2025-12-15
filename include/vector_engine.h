@@ -10,11 +10,19 @@ typedef enum {
     VECS_MODE_GPU
 } vecs_execution_mode_t;
 
+typedef enum {
+    POOLING_UNSPECIFIED = 0,
+    POOLING_CLS,
+    POOLING_LAST,
+    POOLING_MEAN
+} vecs_pooling_type_t;
+
 typedef struct {
     const char *model_path;
     int num_threads;         // Per CPU: numero contesti. Per GPU: ignorato (o usato per preprocessing).
     vecs_execution_mode_t mode; 
     int gpu_layers;          // 0 = CPU, 99 = Full GPU
+    vecs_pooling_type_t pooling;
 } vecs_engine_config_t;
 
 // Inizializza il modello (percorso file .gguf)
