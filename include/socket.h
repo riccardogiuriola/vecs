@@ -9,7 +9,7 @@
 /**
  * @brief Crea un socket TCP, lo imposta come non-bloccante,
  * abilita SO_REUSEADDR, e fa il bind sulla porta specificata.
- * * @param port La porta su cui fare il bind (come stringa, es. "6379").
+ * * @param port La porta su cui fare il bind (come stringa, es. "6380").
  * @param backlog La dimensione della coda di listen.
  * @return Il file descriptor del socket di ascolto, o -1 in caso di errore.
  */

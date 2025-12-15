@@ -7,7 +7,7 @@
 #include "logger.h"
 #include <stdlib.h>
 
-#define DEFAULT_PORT "6379"
+#define DEFAULT_PORT "6380"
 
 int main(void) {
     // Imposta il livello di log

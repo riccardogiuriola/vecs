@@ -20,7 +20,7 @@ typedef struct vector_engine_s vector_engine_t;
 
 /**
  * @brief Crea una nuova istanza del server.
- * * @param port La porta su cui mettersi in ascolto (come stringa, es. "6379").
+ * * @param port La porta su cui mettersi in ascolto (come stringa, es. "6380").
  * @return Un puntatore al nuovo vecs_server_t o NULL in caso di errore.
  */
 vecs_server_t *server_create(const char *port);

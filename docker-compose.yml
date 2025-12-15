@@ -4,7 +4,7 @@ services:
     container_name: vecs
     build: . # Costruisce l'immagine se non esiste
     ports:
-      - "6379:6379"
+      - "6380:6380"
     env_file:
       - .env
     # Scommenta le righe sotto se vuoi usare modelli custom
