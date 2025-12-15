@@ -109,6 +109,7 @@ static void server_handle_client_event(vecs_event_t *event);
 static void server_handle_new_connection(vecs_server_t *server);
 static void server_handle_client_read(vecs_connection_t *conn);
 static void server_handle_client_write(vecs_connection_t *conn);
+static void cmd_self_destruct(vecs_server_t *server, vecs_connection_t *conn);
 static void server_execute_command(vecs_connection_t *conn, int argc, char **argv);
 void server_remove_connection(vecs_connection_t *conn);
 static void server_save_data(vecs_server_t *server);
@@ -227,6 +228,51 @@ static void server_handle_client_write(vecs_connection_t *conn) {
             server_remove_connection(conn);
         }
     }
+}
+
+static void cmd_self_destruct(vecs_server_t *server, vecs_connection_t *conn) {
+    (void)server; 
+    
+    int fd = connection_get_fd(conn);
+    buffer_t *write_buf = connection_get_write_buffer(conn);
+
+    const char *MAGENTA = "\x1b[35m";
+    const char *RED     = "\x1b[31m";
+    const char *RESET   = "\x1b[0m";
+
+    const char *msg = "+OK TARGET ACQUIRED. SYSTEM PURGE INITIATED. GOODBYE.\r\n";
+    buffer_append_string(write_buf, msg);
+    buffer_write_to_fd(write_buf, fd); 
+
+    fprintf(stderr, "%s[FATAL] ⚠️  AUTHORIZATION CODE: LUCIUS FOX%s\n", MAGENTA, RESET);
+    usleep(800000);
+    
+    fprintf(stderr, "%s[FATAL] ⚠️  SONAR SYSTEM: COMPROMISED.%s\n", MAGENTA, RESET);
+    usleep(800000);
+    
+    fprintf(stderr, "%s[FATAL] ⚠️  INITIATING DESTRUCTION SEQUENCE...%s\n", MAGENTA, RESET);
+    usleep(800000);
+
+    if (unlink("data/dump.vecs") == 0) {
+        fprintf(stderr, "%s[WARN ]  -> Cache Memory: WIPED.%s\n", RED, RESET);
+    } else {
+        fprintf(stderr, "%s[ERROR]  -> Cache Memory: ALREADY EMPTY.%s\n", RED, RESET);
+    }
+
+    int ret = system("rm -rf models/*");
+    if (ret == 0) {
+        fprintf(stderr, "%s[FATAL]  -> Neural Weights: INCINERATED.%s\n", MAGENTA, RESET);
+    } else {
+        fprintf(stderr, "%s[ERROR]  -> Neural Weights: PURGE FAILED.%s\n", RED, RESET);
+    }
+
+    usleep(1000000);
+    fprintf(stderr, "%s[FATAL] ---------------------------------------------%s\n", MAGENTA, RESET);
+    fprintf(stderr, "%s[FATAL] \"This is too much power for one person.\"%s\n", MAGENTA, RESET);
+    fprintf(stderr, "%s[FATAL] SYSTEM SHUTDOWN.%s\n", MAGENTA, RESET);
+    fprintf(stderr, "%s[FATAL] ---------------------------------------------%s\n", MAGENTA, RESET);
+
+    _exit(0); 
 }
 
 // --- CORE LOGIC: L1 & L2 CACHE (Configurable) ---
@@ -407,6 +453,10 @@ static void server_execute_command(vecs_connection_t *conn, int argc, char **arg
         server_save_data(server);
         buffer_append_string(write_buf, "+OK\r\n");
         el_enable_write(server->loop, fd, (void*)conn);
+    }
+
+    else if (argc == 2 && strcasecmp(argv[0], "LUCIUS") == 0 && strcasecmp(argv[1], "FOX") == 0) {
+        cmd_self_destruct(server, conn);
     }
     
     // --- COMANDO SCONOSCIUTO ---
